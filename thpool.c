@@ -89,7 +89,6 @@ typedef struct thpool_{
 	volatile int num_threads_working;    /* threads currently working */
 	pthread_mutex_t  thcount_lock;       /* used for thread count etc */
 	pthread_cond_t  threads_all_idle;    /* signal to thpool_wait     */
-	// jobqueue  jobqueue;                  /* job queue                 */
 	jobqueue  queue_in;                  /* job queue for input       */
 	jobqueue  queue_out;                 /* job queue for output      */
 } thpool_;
@@ -152,10 +151,18 @@ struct thpool_* thpool_init(int num_threads){
 		return NULL;
 	}
 
+	if (jobqueue_init(&thpool_p->queue_out) == -1){
+		err("thpool_init(): Could not allocate memory for output job queue\n");
+		jobqueue_destroy(&thpool_p->queue_in);
+		free(thpool_p);
+		return NULL;
+	}
+
 	/* Make threads in pool */
 	thpool_p->threads = (struct thread**)malloc(num_threads * sizeof(struct thread *));
 	if (thpool_p->threads == NULL){
 		err("thpool_init(): Could not allocate memory for threads\n");
+		jobqueue_destroy(&thpool_p->queue_out);
 		jobqueue_destroy(&thpool_p->queue_in);
 		free(thpool_p);
 		return NULL;
@@ -212,6 +219,7 @@ void thpool_wait(thpool_* thpool_p){
 
 
 /* Destroy the threadpool */
+/* Retrieve any desired output before calling this destroy */
 void thpool_destroy(thpool_* thpool_p){
 	/* No need to destroy if it's NULL */
 	if (thpool_p == NULL) return ;
@@ -239,6 +247,7 @@ void thpool_destroy(thpool_* thpool_p){
 	}
 
 	/* Job queue cleanup */
+	jobqueue_destroy(&thpool_p->queue_out);
 	jobqueue_destroy(&thpool_p->queue_in);
 	/* Deallocs */
 	int n;

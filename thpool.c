@@ -61,6 +61,7 @@ typedef struct job{
 	struct job*  prev;           /* pointer to previous job   */
 	function_p   function;       /* function pointer          */
 	void*        arg;            /* function's argument       */
+	int          result;         /* job result code           */
 } job;
 
 
@@ -378,10 +379,10 @@ static void* thread_do(struct thread* thread_p){
 			void*  arg_buff;
 			job* job_p = jobqueue_pull(&thpool_p->queue_in);
 			if (job_p) {
-				func_buff = job_p->function;
-				arg_buff  = job_p->arg;
-				func_buff(arg_buff);
-				free(job_p);
+				func_buff     = job_p->function;
+				arg_buff      = job_p->arg;
+				job_p->result = func_buff(arg_buff);
+				jobqueue_push(&thpool_p->queue_out, job_p);
 			}
 
 			pthread_mutex_lock(&thpool_p->thcount_lock);

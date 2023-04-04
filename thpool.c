@@ -57,8 +57,6 @@ typedef struct bsem {
 
 
 /* Job */
-typedef	void (*function_p)(void* arg);       /* function pointer          */
-
 typedef struct job{
 	struct job*  prev;           /* pointer to previous job   */
 	function_p   function;       /* function pointer          */

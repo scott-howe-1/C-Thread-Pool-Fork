@@ -55,15 +55,27 @@ typedef struct bsem {
 	int v;
 } bsem;
 
+//TODO: job merics
+// typedef struct job_metrics {
+// 	int    age_queue_in;
+// 	int    age_queue_out;
+// }job_metrics;
 
 /* Job */
 typedef struct job{
 	struct job*  prev;           /* pointer to previous job   */
-	function_p   function;       /* function pointer          */
-	void*        arg;            /* function's argument       */
-	int          result;         /* job result code           */
-} job;
 
+//TODO: Still want to use these? May not make sense with constant target function (ioctl())
+	function_p   function;       /* function pointer          */
+	void*        arg;            /* function's argument       */	//fd
+//	void*        arg2;           /* function's argument       */	//cmd_nvme
+
+	int          uuid;           /* job identifier            */
+	int          result;         /* job result code           */
+//	int          age_queue;      /* generic age for either queue?  Later put in metrics struct? */
+
+// 	struct job_metrics     metrics;
+} job;
 
 /* Job queue */
 typedef struct jobqueue{
@@ -73,6 +85,7 @@ typedef struct jobqueue{
 	bsem *has_jobs;                      /* flag as binary semaphore  */
 	int   len;                           /* number of jobs in queue   */
 } jobqueue;
+//TODO: queue metrics
 
 
 /* Thread */
@@ -90,8 +103,8 @@ typedef struct thpool_{
 	volatile int num_threads_working;    /* threads currently working */
 	pthread_mutex_t  thcount_lock;       /* used for thread count etc */
 	pthread_cond_t  threads_all_idle;    /* signal to thpool_wait     */
-	jobqueue  queue_in;                  /* job queue for input       */
-	jobqueue  queue_out;                 /* job queue for output      */
+	jobqueue  queue_in;                  /* queue for pending jobs    */
+	jobqueue  queue_out;                 /* queue for completed jobs  */
 } thpool_;
 
 
@@ -109,7 +122,8 @@ static void  thread_destroy(struct thread* thread_p);
 static int   jobqueue_init(jobqueue* jobqueue_p);
 static void  jobqueue_clear(jobqueue* jobqueue_p);
 static void  jobqueue_push(jobqueue* jobqueue_p, struct job* newjob_p);
-static struct job* jobqueue_pull(jobqueue* jobqueue_p);
+static struct job* jobqueue_pull_front(jobqueue* jobqueue_p);
+static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid);
 static void  jobqueue_destroy(jobqueue* jobqueue_p);
 
 static void  bsem_init(struct bsem *bsem_p, int value);
@@ -189,7 +203,7 @@ struct thpool_* thpool_init(int num_threads){
 
 
 /* Add work to the thread pool */
-int thpool_add_work(thpool_* thpool_p, function_p func_p, void* arg_p){
+int thpool_add_work(thpool_* thpool_p, int uuid, function_p func_p, void* arg_p){
 	job* newjob;
 
 	newjob=(struct job*)malloc(sizeof(struct job));
@@ -202,8 +216,39 @@ int thpool_add_work(thpool_* thpool_p, function_p func_p, void* arg_p){
 	newjob->function=func_p;
 	newjob->arg=arg_p;
 
+	newjob->prev=NULL;
+	newjob->uuid=uuid; //TODO: Generate a UUID here?  Pass in for now so can test.
+	newjob->result=-1; //TODO: Need better "not-yet-used" value?  0xdeadbeef?  Make a pointer(so could use NULL)?
+
 	/* add job to queue */
 	jobqueue_push(&thpool_p->queue_in, newjob);
+
+	return 0;
+}
+
+
+int thpool_get_result(thpool_* thpool_p, int uuid, int* result){
+
+	job* completed_job;
+	*result = -1;	//TODO: Need better default
+
+	completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, uuid);
+
+	if (completed_job){
+		*result = completed_job->result;
+		free(completed_job);
+	}
+	else{
+// TODO: Need to handle NULL (ie - job NOt found) coming back from jobqueue_pull_by_uuid()
+// Wait\retry loop??
+/*
+TODO: Do I want to implement "trylock" like I did in POC?  If so, where\how?
+	In jobqueue_pull_by_uuid()?
+		Pass in returned job pointer as param instead
+		Use return value for error code from trylock
+	Leave this work for AFTER it's in Propeller?
+*/
+	}
 
 	return 0;
 }
@@ -377,7 +422,7 @@ static void* thread_do(struct thread* thread_p){
 			/* Read job from queue and execute it */
 			function_p func_buff;
 			void*  arg_buff;
-			job* job_p = jobqueue_pull(&thpool_p->queue_in);
+			job* job_p = jobqueue_pull_front(&thpool_p->queue_in);
 			if (job_p) {
 				func_buff     = job_p->function;
 				arg_buff      = job_p->arg;
@@ -436,14 +481,13 @@ static int jobqueue_init(jobqueue* jobqueue_p){
 static void jobqueue_clear(jobqueue* jobqueue_p){
 
 	while(jobqueue_p->len){
-		free(jobqueue_pull(jobqueue_p));
+		free(jobqueue_pull_front(jobqueue_p));
 	}
 
 	jobqueue_p->front = NULL;
 	jobqueue_p->rear  = NULL;
 	bsem_reset(jobqueue_p->has_jobs);
 	jobqueue_p->len = 0;
-
 }
 
 
@@ -476,7 +520,7 @@ static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 /* Get first job from queue(removes it from queue)
  * Notice: Caller MUST hold a mutex
  */
-static struct job* jobqueue_pull(jobqueue* jobqueue_p){
+static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 	job* job_p = jobqueue_p->front;
@@ -484,24 +528,86 @@ static struct job* jobqueue_pull(jobqueue* jobqueue_p){
 	switch(jobqueue_p->len){
 
 		case 0:  /* if no jobs in queue */
-		  			break;
+			break;
 
 		case 1:  /* if one job in queue */
-					jobqueue_p->front = NULL;
-					jobqueue_p->rear  = NULL;
-					jobqueue_p->len = 0;
-					break;
+			jobqueue_p->front = NULL;
+			jobqueue_p->rear  = NULL;
+			jobqueue_p->len = 0;
+			break;
 
 		default: /* if >1 jobs in queue */
-					jobqueue_p->front = job_p->prev;
-					jobqueue_p->len--;
-					/* more than one job in queue -> post it */
-					bsem_post(jobqueue_p->has_jobs);
-
+			jobqueue_p->front = job_p->prev;
+			jobqueue_p->len--;
+			/* more than one job in queue -> post it */
+			bsem_post(jobqueue_p->has_jobs);
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
 	return job_p;
+}
+
+
+/* Get first job from queue(removes it from queue)
+ * Notice: Caller MUST hold a mutex
+ */
+	//search uuid in queue_out
+		//lock queue
+		//search uuid
+		//found
+		//not found
+			//wait
+			//  -OR-
+			//fail if long wait
+		//unlock queue
+// returned NULL indicates NOT FOUND
+static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid){
+
+	pthread_mutex_lock(&jobqueue_p->rwmutex);
+	job* curr_job_p = jobqueue_p->front;
+	job* last_job_p = NULL;//Equivalent of curr_job_p->next, if double-linked list implemented. Code is scanning linked list "backwards"
+
+	while(curr_job_p){
+		if (curr_job_p->uuid == uuid){
+			break;
+		}
+		last_job_p = curr_job_p;
+		curr_job_p = curr_job_p->prev;
+	}
+
+	switch(jobqueue_p->len){
+
+		case 0:  /* if no jobs in queue */
+			break;
+
+		case 1:  /* if one job in queue */
+			jobqueue_p->front = NULL;
+			jobqueue_p->rear  = NULL;
+			jobqueue_p->len = 0;
+			break;
+
+		default: /* if >1 jobs in queue */
+			if (!last_job_p) {
+				/* Current job at queue front */
+				jobqueue_p->front = curr_job_p->prev;
+			}
+			else if (!curr_job_p->prev){
+				/* Current job at queue rear */
+				jobqueue_p->rear = last_job_p;
+				last_job_p->prev = NULL;
+			}
+			else {
+				/* Current job somewhere in the middle */
+				last_job_p->prev = curr_job_p->prev;
+			}
+
+			jobqueue_p->len--;
+			/* more than one job in queue -> post it */
+			bsem_post(jobqueue_p->has_jobs);
+	}
+
+	pthread_mutex_unlock(&jobqueue_p->rwmutex);
+	return curr_job_p;
 }
 
 

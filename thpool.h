@@ -16,7 +16,7 @@ extern "C" {
 
 typedef struct thpool_* threadpool;
 
-typedef	void (*function_p)(void* arg);       /* function pointer          */
+typedef	int (*function_p)(void* arg);       /* function pointer          */
 
 
 /**
@@ -66,8 +66,9 @@ threadpool thpool_init(int num_threads);
  * @param  arg_p         pointer to an argument
  * @return 0 on success, -1 otherwise.
  */
-int thpool_add_work(threadpool, function_p func_p, void* arg_p);
+int thpool_add_work(threadpool, int uuid, function_p func_p, void* arg_p);
 
+int thpool_get_result(threadpool, int uuid, int* result);
 
 /**
  * @brief Wait for all queued jobs to finish

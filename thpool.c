@@ -409,6 +409,10 @@ static void* thread_do(struct thread* thread_p){
 	thpool_p->num_threads_alive += 1;
 	pthread_mutex_unlock(&thpool_p->thcount_lock);
 
+	struct timespec ts;
+	ts.tv_sec  = 0;
+	ts.tv_nsec = 1;
+
 	while(threads_keepalive){
 
 		bsem_wait(thpool_p->queue_in.has_jobs);
@@ -437,6 +441,7 @@ static void* thread_do(struct thread* thread_p){
 			}
 			pthread_mutex_unlock(&thpool_p->thcount_lock);
 
+			nanosleep(&ts, &ts);     /* Allow other threads CPU time */
 		}
 	}
 	pthread_mutex_lock(&thpool_p->thcount_lock);

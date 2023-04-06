@@ -231,23 +231,33 @@ int thpool_get_result(thpool_* thpool_p, int uuid, int* result){
 
 	job* completed_job;
 	*result = -1;	//TODO: Need better default
+	int wait_count = 0;	//TODO: How incorporate this?? (specifically, the 200 value below) Where set?
+	struct timespec ts;
 
-	completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, uuid);
+	ts.tv_sec  = 0;
+	ts.tv_nsec = 100;
 
-	if (completed_job){
-		*result = completed_job->result;
-		free(completed_job);
-	}
-	else{
-// TODO: Need to handle NULL (ie - job NOt found) coming back from jobqueue_pull_by_uuid()
+	// printf("main: getting result for uuid %d\n", uuid);
+	while(wait_count < 200){
+
+		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, uuid);
+		// if (completed_job)
+		// 	printf("main: retrieved job: uuid %d, %p\n", uuid, completed_job);
+		// else
+		// 	printf("main: No job found: uuid %d\n", uuid);
+
+		if (completed_job){
+			*result = completed_job->result;
+			free(completed_job);
+			break;
+		}
+		else{
+			printf("main: sleeping: uuid %d\n", uuid);
+			nanosleep(&ts, &ts);
+// TODO: Need to handle NULL (ie - job NOT found) coming back from jobqueue_pull_by_uuid()
 // Wait\retry loop??
-/*
-TODO: Do I want to implement "trylock" like I did in POC?  If so, where\how?
-	In jobqueue_pull_by_uuid()?
-		Pass in returned job pointer as param instead
-		Use return value for error code from trylock
-	Leave this work for AFTER it's in Propeller?
-*/
+		}
+		wait_count++;
 	}
 
 	return 0;
@@ -556,19 +566,17 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 /* Get first job from queue(removes it from queue)
  * Notice: Caller MUST hold a mutex
  */
-	//search uuid in queue_out
-		//lock queue
-		//search uuid
-		//found
-		//not found
-			//wait
-			//  -OR-
-			//fail if long wait
-		//unlock queue
 // returned NULL indicates NOT FOUND
 static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid){
 
-	pthread_mutex_lock(&jobqueue_p->rwmutex);
+/*
+TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
+		Pass in returned job pointer as param instead
+		Use return value for error code from trylock
+	Leave this work for AFTER it's in Propeller?
+	WILL NEED: cuz drives may "vanish" unexpectedly.  Don't want to endlessly wait for a drive that's no longer there.
+*/
+	ret = pthread_mutex_lock(&jobqueue_p->rwmutex);
 	job* curr_job_p = jobqueue_p->front;
 	job* last_job_p = NULL;//Equivalent of curr_job_p->next, if double-linked list implemented. Code is scanning linked list "backwards"
 

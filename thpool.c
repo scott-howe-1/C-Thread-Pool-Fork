@@ -575,35 +575,37 @@ static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid){
 		curr_job_p = curr_job_p->prev;
 	}
 
-	switch(jobqueue_p->len){
+	if (curr_job_p){
+		switch (jobqueue_p->len){
 
-		case 0:  /* if no jobs in queue */
-			break;
+			case 0:  /* if no jobs in queue */
+				break;
 
-		case 1:  /* if one job in queue */
-			jobqueue_p->front = NULL;
-			jobqueue_p->rear  = NULL;
-			jobqueue_p->len = 0;
-			break;
+			case 1:  /* if one job in queue */
+				jobqueue_p->front = NULL;
+				jobqueue_p->rear  = NULL;
+				jobqueue_p->len = 0;
+				break;
 
-		default: /* if >1 jobs in queue */
-			if (!last_job_p) {
-				/* Current job at queue front */
-				jobqueue_p->front = curr_job_p->prev;
-			}
-			else if (!curr_job_p->prev){
-				/* Current job at queue rear */
-				jobqueue_p->rear = last_job_p;
-				last_job_p->prev = NULL;
-			}
-			else {
-				/* Current job somewhere in the middle */
-				last_job_p->prev = curr_job_p->prev;
-			}
+			default: /* if >1 jobs in queue */
+				if (!last_job_p) {
+					/* Current job at queue front */
+					jobqueue_p->front = curr_job_p->prev;
+				}
+				else if (!curr_job_p->prev){
+					/* Current job at queue rear */
+					jobqueue_p->rear = last_job_p;
+					last_job_p->prev = NULL;
+				}
+				else {
+					/* Current job somewhere in the middle */
+					last_job_p->prev = curr_job_p->prev;
+				}
 
-			jobqueue_p->len--;
-			/* more than one job in queue -> post it */
-			bsem_post(jobqueue_p->has_jobs);
+				jobqueue_p->len--;
+				/* more than one job in queue -> post it */
+				bsem_post(jobqueue_p->has_jobs);
+		}
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);

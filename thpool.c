@@ -191,7 +191,7 @@ struct thpool_* thpool_init(int num_threads){
 	for (n=0; n<num_threads; n++){
 		thread_init(thpool_p, &thpool_p->threads[n], n);
 #if THPOOL_DEBUG
-			printf("THPOOL_DEBUG: Created thread %d in pool \n", n);
+		printf("THPOOL_DEBUG: Created thread %d in pool \n", n);
 #endif
 	}
 
@@ -230,32 +230,26 @@ int thpool_add_work(thpool_* thpool_p, int uuid, function_p func_p, void* arg_p)
 int thpool_get_result(thpool_* thpool_p, int uuid, int* result){
 
 	job* completed_job;
-	*result = -1;	//TODO: Need better default
-	int wait_count = 0;	//TODO: How incorporate this?? (specifically, the 200 value below) Where set?
+	*result = -1;          //TODO: Need better default
+	int wait_count = 0;    //TODO: How incorporate this?? (specifically, the 200 value below) Where set?
 	struct timespec ts;
 
 	ts.tv_sec  = 0;
-	ts.tv_nsec = 100;
+	ts.tv_nsec = 100;      //TODO: Re-evaluate this value during testing?  Move out into a struct?
 
-	// printf("main: getting result for uuid %d\n", uuid);
+	// printf("thpool_get_result(): getting result for uuid %d\n", uuid);
 	while(wait_count < 200){
 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, uuid);
-		// if (completed_job)
-		// 	printf("main: retrieved job: uuid %d, %p\n", uuid, completed_job);
-		// else
-		// 	printf("main: No job found: uuid %d\n", uuid);
-
 		if (completed_job){
+		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", uuid, completed_job);
 			*result = completed_job->result;
 			free(completed_job);
 			break;
 		}
 		else{
-			printf("main: sleeping: uuid %d\n", uuid);
+		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", uuid);
 			nanosleep(&ts, &ts);
-// TODO: Need to handle NULL (ie - job NOT found) coming back from jobqueue_pull_by_uuid()
-// Wait\retry loop??
 		}
 		wait_count++;
 	}
@@ -392,6 +386,9 @@ static void* thread_do(struct thread* thread_p){
 	/* Set thread name for profiling and debugging */
 	char thread_name[16] = {0};
 	snprintf(thread_name, 16, "thpool-%d", thread_p->id);
+#if THPOOL_DEBUG
+	printf("Starting Thread #%u\n", (int)pthread_self());
+#endif
 
 #if defined(__linux__)
 	/* Use prctl instead to prevent using _GNU_SOURCE flag and implicit declaration */
@@ -510,25 +507,31 @@ static void jobqueue_clear(jobqueue* jobqueue_p){
  */
 static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 
+//TODO: How handle if newjob != NULL
+//		Would need returned ec from this func
+
+	// printf("          push: start: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 	newjob->prev = NULL;
 
 	switch(jobqueue_p->len){
 
 		case 0:  /* if no jobs in queue */
-					jobqueue_p->front = newjob;
-					jobqueue_p->rear  = newjob;
-					break;
+			jobqueue_p->front = newjob;
+			jobqueue_p->rear  = newjob;
+			break;
 
 		default: /* if jobs in queue */
-					jobqueue_p->rear->prev = newjob;
-					jobqueue_p->rear = newjob;
-
+			// printf("          push: dft: job(%p) to queue(%p) on thread #%u with rear(%p)\n", newjob, jobqueue_p, (int)pthread_self(), jobqueue_p->rear);
+			jobqueue_p->rear->prev = newjob;
+			jobqueue_p->rear = newjob;
 	}
 	jobqueue_p->len++;
 
 	bsem_post(jobqueue_p->has_jobs);
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
+	// printf("          push: end: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
+	// printf("               push: job uuid %d\n", newjob->uuid);
 }
 
 
@@ -559,9 +562,19 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
+	// printf("          pull_front: job(%p) from queue(%p)\n", job_p, jobqueue_p);
+	// if (job_p)
+	// 	printf("               pull_front: job uuid %d\n", job_p->uuid);
 	return job_p;
 }
 
+
+//TODO: Save some of these threading debug messages????
+//		Under existing flag?
+//		May have to move some of the debug messages to be INSIDE the new job mutex lock
+//TODO: Need to expand existing test hardness with new result retrieval code.
+//TODO: Change all functions to return an error code or nothing??
+//		Pass all return values in as function parameters
 
 /* Get first job from queue(removes it from queue)
  * Notice: Caller MUST hold a mutex
@@ -574,14 +587,21 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 		Pass in returned job pointer as param instead
 		Use return value for error code from trylock
 	Leave this work for AFTER it's in Propeller?
-	WILL NEED: cuz drives may "vanish" unexpectedly.  Don't want to endlessly wait for a drive that's no longer there.
+	WILL NEED: cuz drives may "vanish" unexpectedly.
+		Don't want to endlessly wait for a drive that's no longer there.
+TODO: Expand error code handling???
+	Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
 */
-	ret = pthread_mutex_lock(&jobqueue_p->rwmutex);
+	pthread_mutex_lock(&jobqueue_p->rwmutex);
+
 	job* curr_job_p = jobqueue_p->front;
 	job* last_job_p = NULL;//Equivalent of curr_job_p->next, if double-linked list implemented. Code is scanning linked list "backwards"
 
-	while(curr_job_p){
+	// printf("          main: pull_by_uuid: search start: uuid %d in queue(%p) with len %d\n", uuid, jobqueue_p, jobqueue_p->len);
+	while (curr_job_p){
+		// printf("                                             main: pull_by_uuid: curr_job_p(%p), curr_job_p->prev(%p), last_job_p(%p)\n", curr_job_p, curr_job_p->prev, last_job_p);
 		if (curr_job_p->uuid == uuid){
+			// printf("          main: pull_by_uuid: found uuid %d, %p\n", uuid, curr_job_p);
 			break;
 		}
 		last_job_p = curr_job_p;
@@ -622,6 +642,9 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
+	// printf("          main: pull_by_uuid: job(%p) from queue(%p)\n", curr_job_p, jobqueue_p);
+	// if (curr_job_p)
+	// 	printf("               main: pull_by_uuid: job uuid %d\n", curr_job_p->uuid);
 	return curr_job_p;
 }
 

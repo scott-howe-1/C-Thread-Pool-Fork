@@ -78,6 +78,7 @@ typedef struct job{
 } job;
 
 /* Job queue */
+//TODO: add queue size limit (or maybe just a warning that a threshold has been exceeded)
 typedef struct jobqueue{
 	pthread_mutex_t rwmutex;             /* used for queue r/w access */
 	job  *front;                         /* pointer to front of queue */
@@ -89,6 +90,7 @@ typedef struct jobqueue{
 
 
 /* Thread */
+//TODO: Add a flushing state to the thread (for when a task requestor goes away)
 typedef struct thread{
 	int       id;                        /* friendly id               */
 	pthread_t pthread;                   /* pointer to actual thread  */
@@ -203,7 +205,7 @@ struct thpool_* thpool_init(int num_threads){
 
 
 /* Add work to the thread pool */
-int thpool_add_work(thpool_* thpool_p, int uuid, function_p func_p, void* arg_p){
+int thpool_add_work(thpool_* thpool_p, int job_uuid, function_p func_p, void* arg_p){
 	job* newjob;
 
 	newjob=(struct job*)malloc(sizeof(struct job));
@@ -217,7 +219,7 @@ int thpool_add_work(thpool_* thpool_p, int uuid, function_p func_p, void* arg_p)
 	newjob->arg=arg_p;
 
 	newjob->prev=NULL;
-	newjob->uuid=uuid; //TODO: Generate a UUID here?  Pass in for now so can test.
+	newjob->uuid=job_uuid; //TODO: Generate a UUID here?  Pass in for now so can test.
 	newjob->result=-1; //TODO: Need better "not-yet-used" value?  0xdeadbeef?  Make a pointer(so could use NULL)?
 
 	/* add job to queue */
@@ -227,7 +229,7 @@ int thpool_add_work(thpool_* thpool_p, int uuid, function_p func_p, void* arg_p)
 }
 
 
-int thpool_get_result(thpool_* thpool_p, int uuid, int* result){
+int thpool_get_result(thpool_* thpool_p, int job_uuid, int* result){
 
 	job* completed_job;
 	*result = -1;          //TODO: Need better default
@@ -237,18 +239,18 @@ int thpool_get_result(thpool_* thpool_p, int uuid, int* result){
 	ts.tv_sec  = 0;
 	ts.tv_nsec = 100;      //TODO: Re-evaluate this value during testing?  Move out into a struct?
 
-	// printf("thpool_get_result(): getting result for uuid %d\n", uuid);
+	// printf("thpool_get_result(): getting result for uuid %d\n", job_uuid);
 	while(wait_count < 200){
 
-		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, uuid);
+		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
-		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", uuid, completed_job);
+		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
 			*result = completed_job->result;
 			free(completed_job);
 			break;
 		}
 		else{
-		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", uuid);
+		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
 			nanosleep(&ts, &ts);
 		}
 		wait_count++;

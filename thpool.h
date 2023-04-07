@@ -62,13 +62,14 @@ threadpool thpool_init(int num_threads);
  *    }
  *
  * @param  threadpool    threadpool to which the work will be added
+ * @param  job_uuid      unique job identifier
  * @param  func_p        pointer to function to add as work
  * @param  arg_p         pointer to an argument
  * @return 0 on success, -1 otherwise.
  */
-int thpool_add_work(threadpool, int uuid, function_p func_p, void* arg_p);
+int thpool_add_work(threadpool, int job_uuid, function_p func_p, void* arg_p);
 
-int thpool_get_result(threadpool, int uuid, int* result);
+int thpool_get_result(threadpool, int job_uuid, int* result);
 
 /**
  * @brief Wait for all queued jobs to finish

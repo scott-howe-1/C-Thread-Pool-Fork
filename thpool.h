@@ -69,7 +69,13 @@ threadpool thpool_init(int num_threads);
  */
 int thpool_add_work(threadpool, int job_uuid, function_p func_p, void* arg_p);
 
-int thpool_get_result(threadpool, int job_uuid, int* result);
+
+//TODO: Finish docstring
+// @retry_count_max       max retries for job_uuid search
+// @retry_interval_ns     wait time between job_uuid searches in nsec
+// Return -1 if result NOT found
+int thpool_get_result(threadpool, int job_uuid, int retry_count_max, int retry_interval_ns, int* result);
+
 
 /**
  * @brief Wait for all queued jobs to finish

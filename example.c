@@ -46,9 +46,13 @@ void gen_numbers(int array[], int len){
 		array[i] = i;
 }
 
+#define QUEUE_OUT_JOB_UUID_SEARCH_COUNT_MAX	10000
+#define QUEUE_OUT_JOB_UUID_WAIT_INTERVAL_NSEC	10000
+
 int main(){
 	int arr_uuid[NUM_TASKS];
 	int num_errs=0;
+	int num_timeouts=0;
 
 	srand( time(NULL) );
 
@@ -71,19 +75,29 @@ int main(){
 		// thpool_wait(thpool);
 
 		puts("\nRetreiving results from threadpool");
+		int ret;
 		for (i=0; i<NUM_TASKS; i++){
-			thpool_get_result(thpool, arr_uuid[i], &result);
-			printf("main: success uuid:%d, result:%d\n", arr_uuid[i], result);
-			if (result != arr_uuid[i]+100)
-				num_errs++;
-		};
+			ret = thpool_get_result(thpool,
+			                        arr_uuid[i],
+			                        QUEUE_OUT_JOB_UUID_SEARCH_COUNT_MAX,
+			                        QUEUE_OUT_JOB_UUID_WAIT_INTERVAL_NSEC,
+			                        &result);
+			printf("main: received result %d for uuid %d with ret %d\n", result, arr_uuid[i], ret);
+			if (result != arr_uuid[i]+100){
+				if (ret == -1) num_timeouts++;
+				else           num_errs++;
+			}
+		}
 
 		thpool_wait(thpool);
 		puts("\nKilling threadpool");
 		thpool_destroy(thpool);
 
 		printf("main: completed loop %d\n", j);
+		// if (num_errs || num_timeouts)
+		// 	break;
 	}
+	printf("main: num_timeouts = %d\n", num_timeouts);
 	printf("main: num_errs = %d\n", num_errs);
 
 	return 0;

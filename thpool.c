@@ -40,8 +40,21 @@
 #define err(str)
 #endif
 
+//TODO: How deal with these when I have multiple thread pools, each one needing to be individually controlled????
+//		Move into thpool struct???
 static volatile int threads_keepalive;
 static volatile int threads_on_hold;
+
+
+//TODO DUMPING GROUND
+//===================
+//TODO: Need to expand existing test harness with new result retrieval code.
+//TODO: Change all functions to return an error code or nothing??
+//		Pass all return values in as function parameters
+//		Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
+//TODO: Better solution for all the debug messages
+//TODO: add queue metrics
+//TODO: add queue size limit (or maybe just a warning that a threshold has been exceeded)
 
 
 
@@ -55,7 +68,6 @@ typedef struct bsem {
 	int v;
 } bsem;
 
-//TODO: job merics
 // typedef struct job_metrics {
 // 	int    age_queue_in;
 // 	int    age_queue_out;
@@ -65,7 +77,7 @@ typedef struct bsem {
 typedef struct job{
 	struct job*  prev;           /* pointer to previous job   */
 
-//TODO: Still want to use these? May not make sense with constant target function (ioctl())
+//TODO: If keep, need to sort out different function pointer prototypes scattered across test code.
 	function_p   function;       /* function pointer          */
 	void*        arg;            /* function's argument       */	//fd
 //	void*        arg2;           /* function's argument       */	//cmd_nvme
@@ -78,7 +90,6 @@ typedef struct job{
 } job;
 
 /* Job queue */
-//TODO: add queue size limit (or maybe just a warning that a threshold has been exceeded)
 typedef struct jobqueue{
 	pthread_mutex_t rwmutex;             /* used for queue r/w access */
 	job  *front;                         /* pointer to front of queue */
@@ -86,17 +97,15 @@ typedef struct jobqueue{
 	bsem *has_jobs;                      /* flag as binary semaphore  */
 	int   len;                           /* number of jobs in queue   */
 } jobqueue;
-//TODO: queue metrics
 
 
 /* Thread */
-//TODO: Add a flushing state to the thread (for when a task requestor goes away)
+//TODO: Add a flushing state to the thread (for when a task requestor goes away unexpectedly)
 typedef struct thread{
 	int       id;                        /* friendly id               */
 	pthread_t pthread;                   /* pointer to actual thread  */
 	struct thpool_* thpool_p;            /* access to thpool          */
 } thread;
-
 
 /* Threadpool */
 typedef struct thpool_{
@@ -125,7 +134,7 @@ static int   jobqueue_init(jobqueue* jobqueue_p);
 static void  jobqueue_clear(jobqueue* jobqueue_p);
 static void  jobqueue_push(jobqueue* jobqueue_p, struct job* newjob_p);
 static struct job* jobqueue_pull_front(jobqueue* jobqueue_p);
-static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid);
+static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int job_uuid);
 static void  jobqueue_destroy(jobqueue* jobqueue_p);
 
 static void  bsem_init(struct bsem *bsem_p, int value);
@@ -219,7 +228,7 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, function_p func_p, void* ar
 	newjob->arg=arg_p;
 
 	newjob->prev=NULL;
-	newjob->uuid=job_uuid; //TODO: Generate a UUID here?  Pass in for now so can test.
+	newjob->uuid=job_uuid;
 	newjob->result=-1; //TODO: Need better "not-yet-used" value?  0xdeadbeef?  Make a pointer(so could use NULL)?
 
 	/* add job to queue */
@@ -228,35 +237,36 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, function_p func_p, void* ar
 	return 0;
 }
 
+/* Extract result from thread pool */
+int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result){
 
-int thpool_get_result(thpool_* thpool_p, int job_uuid, int* result){
-
-	job* completed_job;
-	*result = -1;          //TODO: Need better default
-	int wait_count = 0;    //TODO: How incorporate this?? (specifically, the 200 value below) Where set?
 	struct timespec ts;
+	job* completed_job;
+	int retry_count = 0;
 
 	ts.tv_sec  = 0;
-	ts.tv_nsec = 100;      //TODO: Re-evaluate this value during testing?  Move out into a struct?
+	ts.tv_nsec = retry_interval_ns;
+
+	*result = -1;          //TODO: Need better default (ioctl() can return -1))
 
 	// printf("thpool_get_result(): getting result for uuid %d\n", job_uuid);
-	while(wait_count < 200){
+	while(retry_count < retry_count_max){
 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
 		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
 			*result = completed_job->result;
 			free(completed_job);
-			break;
+			return 0;
 		}
 		else{
 		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
 			nanosleep(&ts, &ts);
 		}
-		wait_count++;
+		retry_count++;
 	}
 
-	return 0;
+	return -1;
 }
 
 
@@ -348,6 +358,7 @@ int thpool_num_threads_working(thpool_* thpool_p){
  * @param id            id to be given to the thread
  * @return 0 on success, -1 otherwise.
  */
+//TODO: Change thread id to set internally
 static int thread_init (thpool_* thpool_p, struct thread** thread_p, int id){
 
 	*thread_p = (struct thread*)malloc(sizeof(struct thread));
@@ -388,8 +399,9 @@ static void* thread_do(struct thread* thread_p){
 	/* Set thread name for profiling and debugging */
 	char thread_name[16] = {0};
 	snprintf(thread_name, 16, "thpool-%d", thread_p->id);
+//TODO: Set thread "id" here instead (using pthread_self())????  Use both??
 #if THPOOL_DEBUG
-	printf("Starting Thread #%u\n", (int)pthread_self());
+	printf("THPOOL_DEBUG: Starting Thread #%u\n", (int)pthread_self());
 #endif
 
 #if defined(__linux__)
@@ -571,18 +583,11 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 }
 
 
-//TODO: Save some of these threading debug messages????
-//		Under existing flag?
-//		May have to move some of the debug messages to be INSIDE the new job mutex lock
-//TODO: Need to expand existing test hardness with new result retrieval code.
-//TODO: Change all functions to return an error code or nothing??
-//		Pass all return values in as function parameters
-
-/* Get first job from queue(removes it from queue)
+/* Search for job uuid
  * Notice: Caller MUST hold a mutex
  */
 // returned NULL indicates NOT FOUND
-static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int uuid){
+static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int job_uuid){
 
 /*
 TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
@@ -591,8 +596,6 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 	Leave this work for AFTER it's in Propeller?
 	WILL NEED: cuz drives may "vanish" unexpectedly.
 		Don't want to endlessly wait for a drive that's no longer there.
-TODO: Expand error code handling???
-	Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
 */
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 
@@ -602,8 +605,8 @@ TODO: Expand error code handling???
 	// printf("          main: pull_by_uuid: search start: uuid %d in queue(%p) with len %d\n", uuid, jobqueue_p, jobqueue_p->len);
 	while (curr_job_p){
 		// printf("                                             main: pull_by_uuid: curr_job_p(%p), curr_job_p->prev(%p), last_job_p(%p)\n", curr_job_p, curr_job_p->prev, last_job_p);
-		if (curr_job_p->uuid == uuid){
-			// printf("          main: pull_by_uuid: found uuid %d, %p\n", uuid, curr_job_p);
+		if (curr_job_p->uuid == job_uuid){
+			// printf("          main: pull_by_uuid: found uuid %d, %p\n", curr_job_p->uuid, curr_job_p);
 			break;
 		}
 		last_job_p = curr_job_p;

@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include "thpool.h"
@@ -84,8 +83,8 @@ int main(){
 			                        &result);
 			printf("main: received result %d for uuid %d with ret %d\n", result, arr_uuid[i], ret);
 			if (result != arr_uuid[i]+100){
-				if (ret == -1) num_timeouts++;
-				else           num_errs++;
+				if (result == -1) num_timeouts++;
+				if (ret == -1) num_errs++;
 			}
 		}
 

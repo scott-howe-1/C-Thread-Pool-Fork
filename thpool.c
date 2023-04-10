@@ -79,7 +79,7 @@ typedef struct job{
 	struct job*  prev;           /* pointer to previous job   */
 
 //TODO: If keep, need to sort out different function pointer prototypes scattered across test code.
-	function_p   function;       /* function pointer          */
+	th_func_p    function;       /* function pointer          */
 	void*        arg;            /* function's argument       */	//fd
 //	void*        arg2;           /* function's argument       */	//cmd_nvme
 
@@ -215,7 +215,7 @@ struct thpool_* thpool_init(int num_threads){
 
 
 /* Add work to the thread pool */
-int thpool_add_work(thpool_* thpool_p, int job_uuid, function_p func_p, void* arg_p){
+int thpool_add_work(thpool_* thpool_p, int job_uuid, th_func_p func_p, void* arg_p){
 	job* newjob;
 
 	newjob=(struct job*)malloc(sizeof(struct job));
@@ -239,7 +239,7 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, function_p func_p, void* ar
 }
 
 /* Extract result from thread pool */
-int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result){
+int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_P){
 
 	struct timespec ts;
 	job* completed_job;
@@ -248,7 +248,7 @@ int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int 
 	ts.tv_sec  = 0;
 	ts.tv_nsec = retry_interval_ns;
 
-	*result = -1;          //TODO: Need better default (ioctl() can return -1))
+	*result_P = -1;          //TODO: Need better default (ioctl() can return -1))
 
 	// printf("thpool_get_result(): getting result for uuid %d\n", job_uuid);
 	while(retry_count < retry_count_max){
@@ -256,9 +256,9 @@ int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
 		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
-			*result = completed_job->result;
+			*result_P = completed_job->result;
 			free(completed_job);
-			return 0;
+			break;
 		}
 		else{
 		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
@@ -267,7 +267,7 @@ int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int 
 		retry_count++;
 	}
 
-	return -1;
+	return 0;
 }
 
 
@@ -446,7 +446,7 @@ static void* thread_do(struct thread* thread_p){
 			pthread_mutex_unlock(&thpool_p->thcount_lock);
 
 			/* Read job from queue and execute it */
-			function_p func_buff;
+			th_func_p func_buff;
 			void*  arg_buff;
 			job* job_p = jobqueue_pull_front(&thpool_p->queue_in);
 			if (job_p) {

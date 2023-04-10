@@ -40,7 +40,7 @@
 #define err(str)
 #endif
 
-//TODO: How deal with these when I have multiple thread pools, each one needing to be individually controlled????
+//TODO:(captured) How deal with these when I have multiple thread pools, each one needing to be individually controlled????
 //		Move into thpool struct???
 static volatile int threads_keepalive;
 static volatile int threads_on_hold;
@@ -48,13 +48,14 @@ static volatile int threads_on_hold;
 
 //TODO DUMPING GROUND
 //===================
-//TODO: Need to expand existing test harness with new result retrieval code.
-//TODO: Change all functions to return an error code or nothing??
+//TODO:(captured) Need to expand existing test harness with new result retrieval code.
+//TODO:(captured) Change all functions to return an error code or nothing??
 //		Pass all return values in as function parameters
 //		Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
-//TODO: Better solution for all the debug messages
-//TODO: add queue metrics
-//TODO: add queue size limit (or maybe just a warning that a threshold has been exceeded)
+//TODO:(captured) Better solution for all the debug messages
+//TODO:(captured) add queue metrics
+//TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
+//TODO:(captured) Some\all structs need to move to .h file, so available to users of primary thpool apis.
 
 
 
@@ -358,7 +359,7 @@ int thpool_num_threads_working(thpool_* thpool_p){
  * @param id            id to be given to the thread
  * @return 0 on success, -1 otherwise.
  */
-//TODO: Change thread id to set internally
+//TODO: Change thread id to set internally???
 static int thread_init (thpool_* thpool_p, struct thread** thread_p, int id){
 
 	*thread_p = (struct thread*)malloc(sizeof(struct thread));
@@ -521,8 +522,8 @@ static void jobqueue_clear(jobqueue* jobqueue_p){
  */
 static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 
-//TODO: How handle if newjob != NULL
-//		Would need returned ec from this func
+//TODO:(captured) How handle if newjob != NULL
+//		Would need returned ec from this func.  Change when changing all functions to return an ec.
 
 	// printf("          push: start: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
 	pthread_mutex_lock(&jobqueue_p->rwmutex);

@@ -33,10 +33,11 @@ Then run the executable like this:
 
 1. Include the header in your source file: `#include "thpool.h"`
 2. Create a thread pool with number of threads you want: `threadpool thpool = thpool_init(4);`
-3. Add work to the pool: `thpool_add_work(thpool, (void*)function_p, (void*)arg_p);`
+3. Add work to the pool: `thpool_add_work(thpool, job_uuid, (void*)th_func_p, (void*)arg_p);`
+4. Get result from thread: `thpool_get_result(thpool, job_uuid, retry_count_max, retry_interval_ns, result_p);`
 
 The workers(threads) will start their work automatically as fast as there is new work
-in the pool. If you want to wait for all added work to be finished before continuing
+in the pool's input queue (`thpool_->queue_in`). The result obtained from executing the function pointer will be stored in pool's output queue ()`thpool_->queue_out`). If you want to wait for all added work to be finished before continuing
 you can use `thpool_wait(thpool);`. If you want to destroy the pool you can use
 `thpool_destroy(thpool);`.
 
@@ -48,8 +49,9 @@ For a deeper look into the documentation check in the [thpool.h](https://github.
 | Function example                | Description                                                         |
 |---------------------------------|---------------------------------------------------------------------|
 | ***thpool_init(4)***            | Will return a new threadpool with `4` threads.                        |
-| ***thpool_add_work(thpool, (void&#42;)function_p, (void&#42;)arg_p)*** | Will add new work to the pool. Work is simply a function. You can pass a single argument to the function if you wish. If not, `NULL` should be passed. |
+| ***thpool_add_work(thpool, (void&#42;)th_func_p, (void&#42;)arg_p)*** | Will add new work to the pool. Work is simply a function. You can pass a single argument to the function if you wish. If not, `NULL` should be passed. |
 | ***thpool_wait(thpool)***       | Will wait for all jobs (both in queue and currently running) to finish. |
+| ***thpool_get_result(thpool, int job_uuid, int retry_count_max, int retry_interval_ns, (int&#42;) result_p)*** | Attempts to retrieve a job result identified by job_uuid.  |
 | ***thpool_destroy(thpool)***    | This will destroy the threadpool. If jobs are currently being executed, then it will wait for them to finish. |
 | ***thpool_pause(thpool)***      | All threads in the threadpool will pause no matter if they are idle or executing work. |
 | ***thpool_resume(thpool)***      | If the threadpool is paused, then all threads will resume from where they were.   |

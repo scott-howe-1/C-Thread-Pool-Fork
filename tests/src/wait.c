@@ -10,9 +10,9 @@
  *                                 number of threads,
  *                                 wait for each thread separetely (1)?
  *                                 how long each thread should run
- * 
+ *
  * Each job is to simply sleep for given amount of seconds.
- * 
+ *
  * */
 
 
@@ -39,7 +39,7 @@ int main(int argc, char *argv[]){
 
 	int n;
 	for (n=0; n<num_jobs; n++){
-		thpool_add_work(thpool, (void*)sleep_1, &sleep_per_thread);
+		thpool_add_work(thpool, n, (void*)sleep_1, &sleep_per_thread);
 		if (wait_each_job)
 			thpool_wait(thpool);
 	}

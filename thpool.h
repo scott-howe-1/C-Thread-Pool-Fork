@@ -16,6 +16,8 @@ extern "C" {
 
 typedef struct thpool_* threadpool;
 
+typedef	int (*th_func_p)(void* arg);       /* function pointer          */
+
 
 /**
  * @brief  Initialize threadpool
@@ -38,11 +40,11 @@ threadpool thpool_init(int num_threads);
 
 
 /**
- * @brief Add work to the job queue
+ * @brief Add work to the pool's input job queue
  *
- * Takes an action and its argument and adds it to the threadpool's job queue.
- * If you want to add to work a function with more than one arguments then
- * a way to implement this is by passing a pointer to a structure.
+ * Takes an action and its argument and adds it to the threadpool's input job
+ * queue.  If you want to add to work a function with more than one arguments
+ * then a way to implement this is by passing a pointer to a structure.
  *
  * NOTICE: You have to cast both the function and argument to not get warnings.
  *
@@ -55,20 +57,58 @@ threadpool thpool_init(int num_threads);
  *    int main() {
  *       ..
  *       int a = 10;
- *       thpool_add_work(thpool, (void*)print_num, (void*)a);
+ *       thpool_add_work(thpool, job_uuid, (void*)print_num, (void*)a);
  *       ..
  *    }
  *
  * @param  threadpool    threadpool to which the work will be added
- * @param  function_p    pointer to function to add as work
+ * @param  job_uuid      unique job identifier
+ * @param  func_p        pointer to function to add as work
  * @param  arg_p         pointer to an argument
  * @return 0 on success, -1 otherwise.
  */
-int thpool_add_work(threadpool, void (*function_p)(void*), void* arg_p);
+int thpool_add_work(threadpool, int job_uuid, th_func_p func_p, void* arg_p);
 
 
 /**
- * @brief Wait for all queued jobs to finish
+ * @brief Attempts to retrieve the result from the pool's output job queue
+ *
+ * Result is the return value from the passed in function pointer's execution.
+ * Each result is identified by a specific job_uuid.
+ *
+ * NOTICE: After thpool_add_work() is called, if this function is called too
+ * soon, or the rety values are not tuned correctly, the desired job_uuid
+ * may not be found.
+ *
+ * @example
+ *
+ *    void print_num(int num){
+ *       printf("%d\n", num);
+ *    }
+ *
+ *    int main() {
+ *       ..
+ *       int a = 10;
+ *       thpool_add_work(thpool, job_uuid, (void*)print_num, (void*)a);
+ *       ..
+ *       int res = 10;
+ *       int ret;
+ *       ret = thpool_add_work(thpool, job_uuid, 1000, 1000, &res);
+ *       ..
+ *    }
+ *
+ * @param  threadpool            threadpool to which the work will be added
+ * @param  job_uuid              unique job identifier to search for in queue_out
+ * @param  retry_count_max       max retries for job_uuid search
+ * @param  retry_interval_ns     wait time between job_uuid searches in nsec
+ * @param  result_p              returned result from function pointer execution (-1 if result NOT found)
+ * @return 0 on success, -1 otherwise.
+ */
+int thpool_get_result(threadpool, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_p);
+
+
+/**
+ * @brief Wait for all queued input jobs to finish
  *
  * Will wait for all jobs - both queued and currently running to finish.
  * Once the queue is empty and all work has completed, the calling thread

@@ -5,26 +5,30 @@
 #include <stdlib.h>
 #include "../../thpool.h"
 
+#define INCREMENT_SIZE 1
+
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-int sum=0;
+int sum_threads=0;
 
 
-void increment() {
+int increment() {
 	pthread_mutex_lock(&mutex);
-	sum ++;
+	sum_threads += INCREMENT_SIZE;
 	pthread_mutex_unlock(&mutex);
+	return INCREMENT_SIZE;
 }
 
 
 int main(int argc, char *argv[]){
 
 	char* p;
-	if (argc != 3){
-		puts("This testfile needs exactly two arguments");
+	if (argc != 4){
+		puts("This testfile needs exactly 3 arguments");
 		exit(1);
 	}
 	int num_jobs    = strtol(argv[1], &p, 10);
 	int num_threads = strtol(argv[2], &p, 10);
+	int use_results = strtol(argv[3], &p, 10);
 
 	threadpool thpool = thpool_init(num_threads);
 
@@ -35,7 +39,17 @@ int main(int argc, char *argv[]){
 
 	thpool_wait(thpool);
 
-	printf("%d\n", sum);
+	if (use_results){
+		int result;
+		int sum_results=0;
+		for (n=0; n<num_jobs; n++){
+			thpool_get_result(thpool, n, 10000, 10000, &result);
+			sum_results += result;
+		}
+
+		printf("%d\n", sum_results);
+	}
+	printf("%d\n", sum_threads);
 
 	return 0;
 }

@@ -272,6 +272,10 @@ int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int 
 
 
 /* Wait until all jobs have finished */
+//TODO: Hardcoded for "thpool_p->queue_in".
+//		Can "thpool_p->queue_out" even use this concept?
+//				(queue_out NOT GUARENTEED to be emptied out via thpool_get_results())
+//			If NOT, rename function?
 void thpool_wait(thpool_* thpool_p){
 	pthread_mutex_lock(&thpool_p->thcount_lock);
 	while (thpool_p->queue_in.len || thpool_p->num_threads_working) {

@@ -48,7 +48,6 @@ static volatile int threads_on_hold;
 
 //TODO DUMPING GROUND
 //===================
-//TODO:(captured) Need to expand existing test harness with new result retrieval code.
 //TODO:(captured) Change all functions to return an error code or nothing??
 //		Pass all return values in as function parameters
 //		Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
@@ -56,7 +55,10 @@ static volatile int threads_on_hold;
 //TODO:(captured) add queue metrics
 //TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
 //TODO:(captured) Some\all structs need to move to .h file, so available to users of primary thpool apis.
-
+//TODO: How handle duplicate job_uuid's, if at all?
+//		Should this ever happen using UUID's?
+//		Only look for this in queue_out?  What do?
+//		Or, just allow it for now.  Future "queue_out monitor thread" can remove "aged-out" jobs.
 
 
 /* ========================== STRUCTURES ============================ */

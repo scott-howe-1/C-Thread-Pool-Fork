@@ -98,7 +98,7 @@ typedef struct jobqueue{
 	job  *front;                         /* pointer to front of queue */
 	job  *rear;                          /* pointer to rear  of queue */
 	bsem *has_jobs;                      /* flag as binary semaphore  */
-	int   len;                           /* number of jobs in queue   */
+	volatile int len;                    /* number of jobs in queue   */
 } jobqueue;
 
 
@@ -350,6 +350,11 @@ void thpool_resume(thpool_* thpool_p) {
 
 int thpool_num_threads_working(thpool_* thpool_p){
 	return thpool_p->num_threads_working;
+}
+
+
+int thpool_queue_out_len(thpool_* thpool_p){
+	return thpool_p->queue_out.len;
 }
 
 

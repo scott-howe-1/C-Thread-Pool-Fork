@@ -356,7 +356,7 @@ int thpool_num_threads_working(thpool_* thpool_p){
 int thpool_queue_out_len(thpool_* thpool_p){
 	return thpool_p->queue_out.len;
 }
-
+//TODO: Do the above "volatile" struct variables need mutex locks\unlocks around them before accessing???
 
 
 

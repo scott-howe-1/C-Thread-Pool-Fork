@@ -35,7 +35,7 @@ int main(int argc, char *argv[]){
 
 	// Since pool is paused, threads should not start before main's sleep
 	thpool_add_work(thpool, 0, (void*)sleep_4_secs, NULL);
-	thpool_add_work(thpool, 0, (void*)sleep_4_secs, NULL);
+	thpool_add_work(thpool, 1, (void*)sleep_4_secs, NULL);
 
 	sleep(3);
 

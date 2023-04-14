@@ -71,14 +71,15 @@ int thpool_add_work(threadpool, int job_uuid, th_func_p func_p, void* arg_p);
 
 
 /**
- * @brief Attempts to retrieve the result from the pool's output job queue
+ * @brief Searches for completed job and, if found, retrieves it's result
  *
- * Result is the return value from the passed in function pointer's execution.
- * Each result is identified by a specific job_uuid.
+ * Each job has a single result
+ * Each job is identified by a specific job_uuid.
+ * The result is the return value from the executed job's function pointer.
  *
  * NOTICE: After thpool_add_work() is called, if this function is called too
- * soon, or the rety values are not tuned correctly, the desired job_uuid
- * may not be found.
+ * soon, or the rety values are too small, the desired job_uuid may not
+ * be found.
  *
  * @example
  *
@@ -93,7 +94,7 @@ int thpool_add_work(threadpool, int job_uuid, th_func_p func_p, void* arg_p);
  *       ..
  *       int res = 10;
  *       int ret;
- *       ret = thpool_add_work(thpool, job_uuid, 1000, 1000, &res);
+ *       ret = thpool_find_result(thpool, job_uuid, 1000, 1000, &res);
  *       ..
  *    }
  *
@@ -103,8 +104,9 @@ int thpool_add_work(threadpool, int job_uuid, th_func_p func_p, void* arg_p);
  * @param  retry_interval_ns     wait time between job_uuid searches in nsec
  * @param  result_p              returned result from function pointer execution (-1 if result NOT found)
  * @return 0 on success, -1 otherwise.
+ * 			Currently, -1 only represents a "job not found" condition
  */
-int thpool_get_result(threadpool, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_p);
+int thpool_find_result(threadpool, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_p);
 
 
 /**

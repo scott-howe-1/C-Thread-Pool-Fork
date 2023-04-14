@@ -261,42 +261,43 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, th_func_p func_p, void* arg
 }
 
 /* Extract result from thread pool */
-int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_P){
+int thpool_find_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_p){
 
 	struct timespec ts;
 	job* completed_job;
 	int retry_count = 0;
+	int result_found = 0;
 
 	ts.tv_sec  = 0;
 	ts.tv_nsec = retry_interval_ns;
 
-	*result_P = -1;          //TODO: Need better default (ioctl() can return -1))
-
-	// printf("thpool_get_result(): getting result for uuid %d\n", job_uuid);
+	// printf("thpool_find_result(): getting result for uuid %d\n", job_uuid);
 	while(retry_count < retry_count_max){
 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
-		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
-			*result_P = completed_job->result;
+		// 	printf("thpool_find_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
+			*result_p = completed_job->result;
 			free(completed_job);
+			result_found = 1;
 			break;
 		}
 		else{
-		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
+		// 	printf("thpool_find_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
 			nanosleep(&ts, &ts);
 		}
 		retry_count++;
 	}
 
-	return 0;
+	if (result_found) return 0;
+	else              return -1;
 }
 
 
 /* Wait until all jobs have finished */
 //TODO: Hardcoded for "thpool_p->queue_in".
 //		Can "thpool_p->queue_out" even use this concept?
-//				(queue_out NOT GUARENTEED to be emptied out via thpool_get_results())
+//				(queue_out NOT GUARENTEED to be emptied out via thpool_find_results())
 //			If NOT, rename function?
 void thpool_wait(thpool_* thpool_p){
 	pthread_mutex_lock(&thpool_p->thcount_lock);

@@ -51,7 +51,8 @@ void gen_numbers(int array[], int len){
 int main(){
 	int arr_uuid[NUM_TASKS];
 	int num_errs=0;
-	int num_timeouts=0;
+	int num_mismatches=0;
+	int ret;
 
 	srand( time(NULL) );
 
@@ -63,28 +64,37 @@ int main(){
 	for (j=0; j<NUM_LOOPS; j++){
 		puts("Making threadpool with 4 threads");
 		threadpool thpool = thpool_init(4);
+		if (thpool == NULL){
+			printf("%s: Threadpool init failed on loop %d", __func__, j);
+			return -1;
+		}
 
 		puts("\nAdding tasks to threadpool");
 		int i;
 		int result;
 		for (i=0; i<NUM_TASKS; i++){
-			thpool_add_work(thpool, arr_uuid[i], task, (void*)(uintptr_t)arr_uuid[i]);
+			ret = thpool_add_work(thpool, arr_uuid[i], task, (void*)(uintptr_t)arr_uuid[i]);
+			if (ret){
+				printf("%s: Threadpool add work failed on task %d", __func__, i);
+				return -1;
+			}
 		};
 
 		// thpool_wait(thpool);
 
 		puts("\nRetreiving results from threadpool");
-		int ret;
 		for (i=0; i<NUM_TASKS; i++){
-			ret = thpool_get_result(thpool,
+			ret = thpool_find_result(thpool,
 			                        arr_uuid[i],
 			                        QUEUE_OUT_JOB_UUID_SEARCH_COUNT_MAX,
 			                        QUEUE_OUT_JOB_UUID_WAIT_INTERVAL_NSEC,
 			                        &result);
 			printf("main: received result %d for uuid %d with ret %d\n", result, arr_uuid[i], ret);
-			if (result != arr_uuid[i]+100){
-				if (result == -1) num_timeouts++;
-				if (ret == -1) num_errs++;
+			if (ret){
+				num_errs++;
+			}
+			else if (result != task((void*)(intptr_t)arr_uuid[i])){
+				num_mismatches++;
 			}
 		}
 
@@ -93,10 +103,8 @@ int main(){
 		thpool_destroy(thpool);
 
 		printf("main: completed loop %d\n", j);
-		// if (num_errs || num_timeouts)
-		// 	break;
 	}
-	printf("main: num_timeouts = %d\n", num_timeouts);
+	printf("main: num_mismatches = %d\n", num_mismatches);
 	printf("main: num_errs = %d\n", num_errs);
 
 	return 0;

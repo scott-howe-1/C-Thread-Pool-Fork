@@ -48,9 +48,6 @@ static volatile int threads_on_hold;
 
 //TODO DUMPING GROUND
 //===================
-//TODO:(captured) Change all functions to return an error code or nothing??
-//		Pass all return values in as function parameters
-//		Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
 //TODO:(captured) Better solution for all the debug messages
 //TODO:(captured) add queue metrics
 //TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
@@ -122,7 +119,7 @@ typedef struct thpool_{
 } thpool_;
 
 
-
+#define MAX_QUEUE_SIZE_WITHOUT_WARNING      100
 
 
 /* ========================== PROTOTYPES ============================ */
@@ -574,6 +571,9 @@ static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 			jobqueue_p->rear = newjob;
 	}
 	jobqueue_p->len++;
+	if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+		printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+		       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 
 	bsem_post(jobqueue_p->has_jobs);
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
@@ -604,6 +604,9 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 		default: /* if >1 jobs in queue */
 			jobqueue_p->front = job_p->prev;
 			jobqueue_p->len--;
+			if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+				printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+				       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 			/* more than one job in queue -> post it */
 			bsem_post(jobqueue_p->has_jobs);
 	}
@@ -674,6 +677,9 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 				}
 
 				jobqueue_p->len--;
+				if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+					printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+					       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 				/* more than one job in queue -> post it */
 				bsem_post(jobqueue_p->has_jobs);
 		}

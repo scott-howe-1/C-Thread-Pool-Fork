@@ -220,6 +220,25 @@ void thpool_destroy(threadpool);
 int thpool_num_threads_working(threadpool);
 
 
+/**
+ * @brief Show current number jobs in out queue.
+ *
+ * @example
+ * int main() {
+ *    threadpool thpool1 = thpool_init(2);
+ *    threadpool thpool2 = thpool_init(2);
+ *    ..
+ *    printf("Queue out length: %d\n", thpool_queue_out_len(thpool1));
+ *    ..
+ *    return 0;
+ * }
+ *
+ * @param threadpool     the threadpool of interest
+ * @return integer       number of completed jobs in queue_out
+ */
+int thpool_queue_out_len(threadpool);
+
+
 #ifdef __cplusplus
 }
 #endif

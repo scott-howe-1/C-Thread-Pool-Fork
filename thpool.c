@@ -56,7 +56,7 @@ static volatile int threads_on_hold;
 //		Should this ever happen using UUID's?
 //		Only look for this in queue_out?  What do?
 //		Or, just allow it for now.  Future "queue_out monitor thread" can remove "aged-out" jobs.
-
+//TODO: AFTER INTEGRATION: all printf() and err() calls must be replaced will appropriate logging function calls
 
 /* ========================== STRUCTURES ============================ */
 
@@ -137,7 +137,7 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p);
 static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int job_uuid);
 static void  jobqueue_destroy(jobqueue* jobqueue_p);
 
-static void  bsem_init(struct bsem *bsem_p, int value);
+static int   bsem_init(struct bsem *bsem_p, int value);
 static void  bsem_reset(struct bsem *bsem_p);
 static void  bsem_post(struct bsem *bsem_p);
 static void  bsem_post_all(struct bsem *bsem_p);
@@ -517,19 +517,21 @@ static void thread_destroy (thread* thread_p){
 
 /* Initialize queue */
 static int jobqueue_init(jobqueue* jobqueue_p){
+	int ret = -1;
+
 	jobqueue_p->len = 0;
 	jobqueue_p->front = NULL;
 	jobqueue_p->rear  = NULL;
 
 	jobqueue_p->has_jobs = (struct bsem*)malloc(sizeof(struct bsem));
 	if (jobqueue_p->has_jobs == NULL){
-		return -1;
+		return ret;
 	}
 
 	pthread_mutex_init(&(jobqueue_p->rwmutex), NULL);
-	bsem_init(jobqueue_p->has_jobs, 0);
+	ret = bsem_init(jobqueue_p->has_jobs, 0);
 
-	return 0;
+	return ret;
 }
 
 
@@ -707,14 +709,16 @@ static void jobqueue_destroy(jobqueue* jobqueue_p){
 
 
 /* Init semaphore to 1 or 0 */
-static void bsem_init(bsem *bsem_p, int value) {
+static int bsem_init(bsem *bsem_p, int value) {
 	if (value < 0 || value > 1) {
 		err("bsem_init(): Binary semaphore can take only values 1 or 0");
-		exit(1);
+		return -1;
 	}
 	pthread_mutex_init(&(bsem_p->mutex), NULL);
 	pthread_cond_init(&(bsem_p->cond), NULL);
 	bsem_p->v = value;
+
+	return 0;
 }
 
 

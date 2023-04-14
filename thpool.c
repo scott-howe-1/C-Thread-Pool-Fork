@@ -215,7 +215,22 @@ struct thpool_* thpool_init(int num_threads){
 	}
 
 	/* Wait for threads to initialize */
-	while (thpool_p->num_threads_alive != num_threads) {}
+	struct timespec ts;
+	int wait_count = 0;
+
+	ts.tv_sec  = 0;
+	ts.tv_nsec = 100;
+	while (thpool_p->num_threads_alive != num_threads){
+		nanosleep(&ts, &ts);
+		wait_count++;
+		if (wait_count > 100000000){//Kludge to give 10 sec max wait
+#if THPOOL_DEBUG
+			printf("THPOOL_DEBUG: Timeout waiting for all pool threads to start\n");
+#endif
+			thpool_destroy(thpool_p);
+			return NULL;
+		}
+	}
 
 	return thpool_p;
 }

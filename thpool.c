@@ -57,6 +57,9 @@ static volatile int threads_on_hold;
 //		Only look for this in queue_out?  What do?
 //		Or, just allow it for now.  Future "queue_out monitor thread" can remove "aged-out" jobs.
 //TODO: AFTER INTEGRATION: all printf() and err() calls must be replaced will appropriate logging function calls
+//TODO: Review mutex usage.
+//		Some thread-shared "volatile" struct params are read outside of mutex locks.
+//			Should locks be added?
 
 /* ========================== STRUCTURES ============================ */
 
@@ -125,7 +128,7 @@ typedef struct thpool_{
 /* ========================== PROTOTYPES ============================ */
 
 
-static int  thread_init(thpool_* thpool_p, struct thread** thread_p, int id);
+static int   thread_init(thpool_* thpool_p, struct thread** thread_p, int id);
 static void* thread_do(struct thread* thread_p);
 static void  thread_hold(int sig_id);
 static void  thread_destroy(struct thread* thread_p);
@@ -249,7 +252,6 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, th_func_p func_p, void* arg
 
 	newjob->prev=NULL;
 	newjob->uuid=job_uuid;
-	newjob->result=-1; //TODO: Need better "not-yet-used" value?  0xdeadbeef?  Make a pointer(so could use NULL)?
 
 	/* add job to queue */
 	jobqueue_push(&thpool_p->queue_in, newjob);
@@ -374,7 +376,6 @@ int thpool_num_threads_working(thpool_* thpool_p){
 int thpool_queue_out_len(thpool_* thpool_p){
 	return thpool_p->queue_out.len;
 }
-//TODO: Do the above "volatile" struct variables need mutex locks\unlocks around them before accessing???
 
 
 
@@ -552,9 +553,6 @@ static void jobqueue_clear(jobqueue* jobqueue_p){
 /* Add (allocated) job to queue
  */
 static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
-
-//TODO:(captured) How handle if newjob != NULL
-//		Would need returned ec from this func.  Change when changing all functions to return an ec.
 
 	// printf("          push: start: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
 	pthread_mutex_lock(&jobqueue_p->rwmutex);

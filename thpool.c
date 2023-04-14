@@ -201,9 +201,14 @@ struct thpool_* thpool_init(int num_threads){
 	pthread_cond_init(&thpool_p->threads_all_idle, NULL);
 
 	/* Thread init */
+	int ret;
 	int n;
 	for (n=0; n<num_threads; n++){
-		thread_init(thpool_p, &thpool_p->threads[n], n);
+		ret = thread_init(thpool_p, &thpool_p->threads[n], n);
+		if (ret) {
+			thpool_destroy(thpool_p);
+			return NULL;
+		}
 #if THPOOL_DEBUG
 		printf("THPOOL_DEBUG: Created thread %d in pool \n", n);
 #endif

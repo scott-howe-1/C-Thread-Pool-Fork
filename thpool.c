@@ -141,6 +141,7 @@ static void  jobqueue_clear(jobqueue* jobqueue_p);
 static void  jobqueue_push(jobqueue* jobqueue_p, struct job* newjob_p);
 static struct job* jobqueue_pull_front(jobqueue* jobqueue_p);
 static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int job_uuid);
+static int   jobqueue_length(jobqueue* jobqueue_p);
 static void  jobqueue_destroy(jobqueue* jobqueue_p);
 
 static int   bsem_init(struct bsem *bsem_p, int value);
@@ -310,7 +311,7 @@ int thpool_find_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int
 //			If NOT, rename function?
 void thpool_wait(thpool_* thpool_p){
 	pthread_mutex_lock(&thpool_p->thcount_lock);
-	while (thpool_p->queue_in.len || thpool_p->num_threads_working) {
+	while (jobqueue_length(&thpool_p->queue_in) || thpool_p->num_threads_working) {
 		pthread_cond_wait(&thpool_p->threads_all_idle, &thpool_p->thcount_lock);
 	}
 	pthread_mutex_unlock(&thpool_p->thcount_lock);
@@ -387,7 +388,7 @@ int thpool_num_threads_working(thpool_* thpool_p){
 
 
 int thpool_queue_out_len(thpool_* thpool_p){
-	return thpool_p->queue_out.len;
+	return jobqueue_length(&thpool_p->queue_out);
 }
 
 
@@ -573,14 +574,16 @@ static int jobqueue_init(jobqueue* jobqueue_p){
 /* Clear the queue */
 static void jobqueue_clear(jobqueue* jobqueue_p){
 
-	while(jobqueue_p->len){
+	while(jobqueue_length(jobqueue_p)){
 		free(jobqueue_pull_front(jobqueue_p));
 	}
 
+	pthread_mutex_lock(&jobqueue_p->rwmutex);
 	jobqueue_p->front = NULL;
 	jobqueue_p->rear  = NULL;
 	bsem_reset(jobqueue_p->has_jobs);
 	jobqueue_p->len = 0;
+	pthread_mutex_unlock(&jobqueue_p->rwmutex);
 }
 
 
@@ -728,6 +731,17 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 	       __func__, curr_job_p, uuid, jobqueue_p, (unsigned int)pthread_self());
 #endif
 	return curr_job_p;
+}
+
+
+/* Get the queue's current length */
+static int jobqueue_length(jobqueue* jobqueue_p){
+	int len;
+	pthread_mutex_lock(&jobqueue_p->rwmutex);
+	len = jobqueue_p->len;
+	pthread_mutex_unlock(&jobqueue_p->rwmutex);
+
+	return len;
 }
 
 

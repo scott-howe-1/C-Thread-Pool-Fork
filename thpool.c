@@ -48,9 +48,6 @@ static volatile int threads_on_hold;
 
 //TODO DUMPING GROUND
 //===================
-//TODO:(captured) Change all functions to return an error code or nothing??
-//		Pass all return values in as function parameters
-//		Should all lock()\unlock() calls have their ec checked\returned (as part of a general ec handling framework)?
 //TODO:(captured) Better solution for all the debug messages
 //TODO:(captured) add queue metrics
 //TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
@@ -59,7 +56,10 @@ static volatile int threads_on_hold;
 //		Should this ever happen using UUID's?
 //		Only look for this in queue_out?  What do?
 //		Or, just allow it for now.  Future "queue_out monitor thread" can remove "aged-out" jobs.
-
+//TODO: AFTER INTEGRATION: all printf() and err() calls must be replaced will appropriate logging function calls
+//TODO: Review mutex usage.
+//		Some thread-shared "volatile" struct params are read outside of mutex locks.
+//			Should locks be added?
 
 /* ========================== STRUCTURES ============================ */
 
@@ -122,13 +122,13 @@ typedef struct thpool_{
 } thpool_;
 
 
-
+#define MAX_QUEUE_SIZE_WITHOUT_WARNING      100
 
 
 /* ========================== PROTOTYPES ============================ */
 
 
-static int  thread_init(thpool_* thpool_p, struct thread** thread_p, int id);
+static int   thread_init(thpool_* thpool_p, struct thread** thread_p, int id);
 static void* thread_do(struct thread* thread_p);
 static void  thread_hold(int sig_id);
 static void  thread_destroy(struct thread* thread_p);
@@ -140,7 +140,7 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p);
 static struct job* jobqueue_pull_by_uuid(jobqueue* jobqueue_p, int job_uuid);
 static void  jobqueue_destroy(jobqueue* jobqueue_p);
 
-static void  bsem_init(struct bsem *bsem_p, int value);
+static int   bsem_init(struct bsem *bsem_p, int value);
 static void  bsem_reset(struct bsem *bsem_p);
 static void  bsem_post(struct bsem *bsem_p);
 static void  bsem_post_all(struct bsem *bsem_p);
@@ -201,16 +201,36 @@ struct thpool_* thpool_init(int num_threads){
 	pthread_cond_init(&thpool_p->threads_all_idle, NULL);
 
 	/* Thread init */
+	int ret;
 	int n;
 	for (n=0; n<num_threads; n++){
-		thread_init(thpool_p, &thpool_p->threads[n], n);
+		ret = thread_init(thpool_p, &thpool_p->threads[n], n);
+		if (ret) {
+			thpool_destroy(thpool_p);
+			return NULL;
+		}
 #if THPOOL_DEBUG
 		printf("THPOOL_DEBUG: Created thread %d in pool \n", n);
 #endif
 	}
 
 	/* Wait for threads to initialize */
-	while (thpool_p->num_threads_alive != num_threads) {}
+	struct timespec ts;
+	int wait_count = 0;
+
+	ts.tv_sec  = 0;
+	ts.tv_nsec = 100;
+	while (thpool_p->num_threads_alive != num_threads){
+		nanosleep(&ts, &ts);
+		wait_count++;
+		if (wait_count > 100000000){//Kludge to give 10 sec max wait
+#if THPOOL_DEBUG
+			printf("THPOOL_DEBUG: Timeout waiting for all pool threads to start\n");
+#endif
+			thpool_destroy(thpool_p);
+			return NULL;
+		}
+	}
 
 	return thpool_p;
 }
@@ -232,7 +252,6 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, th_func_p func_p, void* arg
 
 	newjob->prev=NULL;
 	newjob->uuid=job_uuid;
-	newjob->result=-1; //TODO: Need better "not-yet-used" value?  0xdeadbeef?  Make a pointer(so could use NULL)?
 
 	/* add job to queue */
 	jobqueue_push(&thpool_p->queue_in, newjob);
@@ -241,42 +260,43 @@ int thpool_add_work(thpool_* thpool_p, int job_uuid, th_func_p func_p, void* arg
 }
 
 /* Extract result from thread pool */
-int thpool_get_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_P){
+int thpool_find_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int retry_interval_ns, int* result_p){
 
 	struct timespec ts;
 	job* completed_job;
 	int retry_count = 0;
+	int result_found = 0;
 
 	ts.tv_sec  = 0;
 	ts.tv_nsec = retry_interval_ns;
 
-	*result_P = -1;          //TODO: Need better default (ioctl() can return -1))
-
-	// printf("thpool_get_result(): getting result for uuid %d\n", job_uuid);
+	// printf("thpool_find_result(): getting result for uuid %d\n", job_uuid);
 	while(retry_count < retry_count_max){
 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
-		// 	printf("thpool_get_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
-			*result_P = completed_job->result;
+		// 	printf("thpool_find_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
+			*result_p = completed_job->result;
 			free(completed_job);
+			result_found = 1;
 			break;
 		}
 		else{
-		// 	printf("thpool_get_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
+		// 	printf("thpool_find_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
 			nanosleep(&ts, &ts);
 		}
 		retry_count++;
 	}
 
-	return 0;
+	if (result_found) return 0;
+	else              return -1;
 }
 
 
 /* Wait until all jobs have finished */
 //TODO: Hardcoded for "thpool_p->queue_in".
 //		Can "thpool_p->queue_out" even use this concept?
-//				(queue_out NOT GUARENTEED to be emptied out via thpool_get_results())
+//				(queue_out NOT GUARENTEED to be emptied out via thpool_find_results())
 //			If NOT, rename function?
 void thpool_wait(thpool_* thpool_p){
 	pthread_mutex_lock(&thpool_p->thcount_lock);
@@ -356,7 +376,6 @@ int thpool_num_threads_working(thpool_* thpool_p){
 int thpool_queue_out_len(thpool_* thpool_p){
 	return thpool_p->queue_out.len;
 }
-//TODO: Do the above "volatile" struct variables need mutex locks\unlocks around them before accessing???
 
 
 
@@ -499,19 +518,21 @@ static void thread_destroy (thread* thread_p){
 
 /* Initialize queue */
 static int jobqueue_init(jobqueue* jobqueue_p){
+	int ret = -1;
+
 	jobqueue_p->len = 0;
 	jobqueue_p->front = NULL;
 	jobqueue_p->rear  = NULL;
 
 	jobqueue_p->has_jobs = (struct bsem*)malloc(sizeof(struct bsem));
 	if (jobqueue_p->has_jobs == NULL){
-		return -1;
+		return ret;
 	}
 
 	pthread_mutex_init(&(jobqueue_p->rwmutex), NULL);
-	bsem_init(jobqueue_p->has_jobs, 0);
+	ret = bsem_init(jobqueue_p->has_jobs, 0);
 
-	return 0;
+	return ret;
 }
 
 
@@ -533,9 +554,6 @@ static void jobqueue_clear(jobqueue* jobqueue_p){
  */
 static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 
-//TODO:(captured) How handle if newjob != NULL
-//		Would need returned ec from this func.  Change when changing all functions to return an ec.
-
 	// printf("          push: start: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 	newjob->prev = NULL;
@@ -553,6 +571,9 @@ static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 			jobqueue_p->rear = newjob;
 	}
 	jobqueue_p->len++;
+	if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+		printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+		       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 
 	bsem_post(jobqueue_p->has_jobs);
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
@@ -583,6 +604,9 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 		default: /* if >1 jobs in queue */
 			jobqueue_p->front = job_p->prev;
 			jobqueue_p->len--;
+			if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+				printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+				       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 			/* more than one job in queue -> post it */
 			bsem_post(jobqueue_p->has_jobs);
 	}
@@ -653,6 +677,9 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 				}
 
 				jobqueue_p->len--;
+				if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
+					printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
+					       MAX_QUEUE_SIZE_WITHOUT_WARNING);
 				/* more than one job in queue -> post it */
 				bsem_post(jobqueue_p->has_jobs);
 		}
@@ -680,14 +707,16 @@ static void jobqueue_destroy(jobqueue* jobqueue_p){
 
 
 /* Init semaphore to 1 or 0 */
-static void bsem_init(bsem *bsem_p, int value) {
+static int bsem_init(bsem *bsem_p, int value) {
 	if (value < 0 || value > 1) {
 		err("bsem_init(): Binary semaphore can take only values 1 or 0");
-		exit(1);
+		return -1;
 	}
 	pthread_mutex_init(&(bsem_p->mutex), NULL);
 	pthread_cond_init(&(bsem_p->cond), NULL);
 	bsem_p->v = value;
+
+	return 0;
 }
 
 

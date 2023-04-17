@@ -46,7 +46,7 @@ int main(int argc, char *argv[]){
 		int sum_results=0;
 		int ret;
 		for (n=0; n<num_jobs; n++){
-			ret = thpool_get_result(thpool, n, 10000, 10000, &result);
+			ret = thpool_find_result(thpool, n, 10000, 10000, &result);
 			printf("ret=%d\n", ret);
 			sum_results += result;
 		}

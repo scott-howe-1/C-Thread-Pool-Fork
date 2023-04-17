@@ -49,7 +49,6 @@ static volatile int threads_on_hold;
 //TODO DUMPING GROUND
 //===================
 //TODO:(captured) add queue metrics
-//TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
 //TODO:(captured) Some\all structs need to move to .h file, so available to users of primary thpool apis.
 //TODO: How handle duplicate job_uuid's, if at all?
 //		Should this ever happen using UUID's?

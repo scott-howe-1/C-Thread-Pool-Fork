@@ -50,9 +50,6 @@
 //		Only look for this in queue_out?  What do?
 //		Or, just allow it for now.  Future "queue_out monitor thread" can remove "aged-out" jobs.
 //TODO: AFTER INTEGRATION: all printf() and err() calls must be replaced will appropriate logging function calls
-//TODO: Review mutex usage.
-//		Some thread-shared "volatile" struct params are read outside of mutex locks.
-//			Should locks be added?
 
 
 
@@ -324,7 +321,7 @@ void thpool_destroy(thpool_* thpool_p){
 	/* No need to destroy if it's NULL */
 	if (thpool_p == NULL) return ;
 
-	volatile int threads_total = thpool_p->num_threads_alive;
+	volatile int threads_total = thpool_num_threads_alive(thpool_p);
 
 	/* End each thread 's infinite loop */
 	pthread_mutex_lock(&thpool_p->alive_lock);
@@ -336,14 +333,14 @@ void thpool_destroy(thpool_* thpool_p){
 	time_t start, end;
 	double tpassed = 0.0;
 	time (&start);
-	while (tpassed < TIMEOUT && thpool_p->num_threads_alive){
+	while (tpassed < TIMEOUT && thpool_num_threads_alive(thpool_p)){
 		bsem_post_all(thpool_p->queue_in.has_jobs);
 		time (&end);
 		tpassed = difftime(end,start);
 	}
 
 	/* Poll remaining threads */
-	while (thpool_p->num_threads_alive){
+	while (thpool_num_threads_alive(thpool_p)){
 		bsem_post_all(thpool_p->queue_in.has_jobs);
 		sleep(1);
 	}
@@ -367,7 +364,7 @@ void thpool_destroy(thpool_* thpool_p){
 /* Pause all threads in threadpool */
 void thpool_pause(thpool_* thpool_p) {
 	int n;
-	for (n=0; n < thpool_p->num_threads_alive; n++){
+	for (n=0; n < thpool_num_threads_alive(thpool_p); n++){
 		pthread_kill(thpool_p->threads[n]->pthread, SIGUSR1);
 	}
 }
@@ -376,14 +373,27 @@ void thpool_pause(thpool_* thpool_p) {
 /* Resume all threads in threadpool */
 void thpool_resume(thpool_* thpool_p) {
 	int n;
-	for (n=0; n < thpool_p->num_threads_alive; n++){
+	for (n=0; n < thpool_num_threads_alive(thpool_p); n++){
 		pthread_kill(thpool_p->threads[n]->pthread, SIGUSR2);
 	}
 }
 
 
+int thpool_num_threads_alive(thpool_* thpool_p){
+	int num;
+	pthread_mutex_lock(&thpool_p->thcount_lock);
+	num = thpool_p->num_threads_alive;
+	pthread_mutex_unlock(&thpool_p->thcount_lock);
+	return num;
+}
+
+
 int thpool_num_threads_working(thpool_* thpool_p){
-	return thpool_p->num_threads_working;
+	int num;
+	pthread_mutex_lock(&thpool_p->thcount_lock);
+	num = thpool_p->num_threads_working;
+	pthread_mutex_unlock(&thpool_p->thcount_lock);
+	return num;
 }
 
 
@@ -397,7 +407,6 @@ int thpool_alive_state(thpool_* thpool_p){
 	pthread_mutex_lock(&thpool_p->alive_lock);
 	state = thpool_p->threads_keepalive;
 	pthread_mutex_unlock(&thpool_p->alive_lock);
-
 	return state;
 }
 
@@ -493,7 +502,7 @@ static void* thread_do(struct thread* thread_p){
 
 	/* Mark thread as alive (initialized) */
 	pthread_mutex_lock(&thpool_p->thcount_lock);
-	thpool_p->num_threads_alive += 1;
+	thpool_p->num_threads_alive++;
 	pthread_mutex_unlock(&thpool_p->thcount_lock);
 
 	struct timespec ts;
@@ -532,7 +541,7 @@ static void* thread_do(struct thread* thread_p){
 		}
 	}
 	pthread_mutex_lock(&thpool_p->thcount_lock);
-	thpool_p->num_threads_alive --;
+	thpool_p->num_threads_alive--;
 	pthread_mutex_unlock(&thpool_p->thcount_lock);
 
 	return NULL;

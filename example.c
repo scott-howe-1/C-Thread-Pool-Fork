@@ -24,8 +24,8 @@ int task(void *arg){
 
 	int result = (int)(intptr_t)arg  + 100;
 
-	printf("Thread #%u: uuid:%d, ret:%d\n",
-	       (int)pthread_self(), (int)(intptr_t)arg, result);
+	printf("%s: (pthread:%u) uuid:%d, ret:%d\n",
+	       __func__, (int)pthread_self(), (int)(intptr_t)arg, result);
 
 	return result;
 }
@@ -59,37 +59,38 @@ int main(){
 	gen_random_numbers(arr_uuid, NUM_TASKS, 1, NUM_TASKS);
 	// gen_numbers(arr_uuid, NUM_TASKS);
 
-	printf("Main Thread #%u\n", (int)pthread_self());
+	printf("%s: pthread:%u\n", __func__, (int)pthread_self());
 	int j;
 	for (j=0; j<NUM_LOOPS; j++){
-		puts("Making threadpool with 4 threads");
+		printf("%s: Making threadpool with 4 threads\n", __func__);
 		threadpool thpool = thpool_init(4);
 		if (thpool == NULL){
 			printf("%s: Threadpool init failed on loop %d", __func__, j);
 			return -1;
 		}
 
-		puts("\nAdding tasks to threadpool");
+		printf("\n%s: Adding tasks to threadpool\n", __func__);
 		int i;
 		int result;
 		for (i=0; i<NUM_TASKS; i++){
 			ret = thpool_add_work(thpool, arr_uuid[i], task, (void*)(uintptr_t)arr_uuid[i]);
 			if (ret){
-				printf("%s: Threadpool add work failed on task %d", __func__, i);
+				// printf("%s: Threadpool add work failed on task %d", __func__, i);
 				return -1;
 			}
 		};
 
 		// thpool_wait(thpool);
 
-		puts("\nRetreiving results from threadpool");
+		printf("\n%s: Retreiving results from threadpool\n", __func__);
 		for (i=0; i<NUM_TASKS; i++){
 			ret = thpool_find_result(thpool,
 			                        arr_uuid[i],
 			                        QUEUE_OUT_JOB_UUID_SEARCH_COUNT_MAX,
 			                        QUEUE_OUT_JOB_UUID_WAIT_INTERVAL_NSEC,
 			                        &result);
-			printf("main: received result %d for uuid %d with ret %d\n", result, arr_uuid[i], ret);
+			printf("%s: received result %d for uuid %d with ret %d\n",
+			       __func__, result, arr_uuid[i], ret);
 			if (ret){
 				num_errs++;
 			}
@@ -99,13 +100,13 @@ int main(){
 		}
 
 		thpool_wait(thpool);
-		puts("\nKilling threadpool");
+		printf("\n%s: Killing threadpool\n", __func__);
 		thpool_destroy(thpool);
 
-		printf("main: completed loop %d\n", j);
+		printf("%s: completed loop %d\n", __func__, j);
 	}
-	printf("main: num_mismatches = %d\n", num_mismatches);
-	printf("main: num_errs = %d\n", num_errs);
+	printf("%s: num_mismatches = %d\n", __func__, num_mismatches);
+	printf("%s: num_errs = %d\n", __func__, num_errs);
 
 	return 0;
 }

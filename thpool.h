@@ -240,6 +240,24 @@ int thpool_num_threads_working(threadpool);
  */
 int thpool_queue_out_len(threadpool);
 
+/**
+ * @brief Show current state of thpool "keepalive" flag.
+ *
+ * @example
+ * int main() {
+ *    threadpool thpool1 = thpool_init(2);
+ *    threadpool thpool2 = thpool_init(2);
+ *    ..
+ *    printf("Queue out length: %d\n", thpool_alive_state(thpool1));
+ *    ..
+ *    return 0;
+ * }
+ *
+ * @param threadpool     the threadpool of interest
+ * @return integer       thpool's "keepalive" flag state.
+ *                       1 - keep all threads alive, 0 - kill all threads
+ */
+int thpool_alive_state(threadpool);
 
 #ifdef __cplusplus
 }

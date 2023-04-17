@@ -40,16 +40,11 @@
 #define err(str)
 #endif
 
-//TODO:(captured) How deal with these when I have multiple thread pools, each one needing to be individually controlled????
-//		Move into thpool struct???
-static volatile int threads_keepalive;
-static volatile int threads_on_hold;
 
 
 //TODO DUMPING GROUND
 //===================
 //TODO:(captured) add queue metrics
-//TODO:(captured) Some\all structs need to move to .h file, so available to users of primary thpool apis.
 //TODO: How handle duplicate job_uuid's, if at all?
 //		Should this ever happen using UUID's?
 //		Only look for this in queue_out?  What do?
@@ -116,10 +111,15 @@ typedef struct thread{
 /* Threadpool */
 typedef struct thpool_{
 	thread**   threads;                  /* pointer to threads        */
+
 	volatile int num_threads_alive;      /* threads currently alive   */
 	volatile int num_threads_working;    /* threads currently working */
 	pthread_mutex_t  thcount_lock;       /* used for thread count etc */
 	pthread_cond_t  threads_all_idle;    /* signal to thpool_wait     */
+
+	volatile int threads_keepalive;      /* All threads live\die flag */
+	pthread_mutex_t  alive_lock;         /* used for thpool run state */
+
 	jobqueue  queue_in;                  /* queue for pending jobs    */
 	jobqueue  queue_out;                 /* queue for completed jobs  */
 } thpool_;
@@ -148,6 +148,7 @@ static void  bsem_reset(struct bsem *bsem_p);
 static void  bsem_post(struct bsem *bsem_p);
 static void  bsem_post_all(struct bsem *bsem_p);
 static void  bsem_wait(struct bsem *bsem_p);
+static void  bsem_destroy(struct bsem *bsem_p);
 
 
 
@@ -158,9 +159,6 @@ static void  bsem_wait(struct bsem *bsem_p);
 
 /* Initialise thread pool */
 struct thpool_* thpool_init(int num_threads){
-
-	threads_on_hold   = 0;
-	threads_keepalive = 1;
 
 	if (num_threads < 0){
 		num_threads = 0;
@@ -175,6 +173,7 @@ struct thpool_* thpool_init(int num_threads){
 	}
 	thpool_p->num_threads_alive   = 0;
 	thpool_p->num_threads_working = 0;
+	thpool_p->threads_keepalive   = 1;
 
 	/* Initialise the job queue */
 	if (jobqueue_init(&thpool_p->queue_in) == -1){
@@ -201,6 +200,7 @@ struct thpool_* thpool_init(int num_threads){
 	}
 
 	pthread_mutex_init(&(thpool_p->thcount_lock), NULL);
+	pthread_mutex_init(&(thpool_p->alive_lock), NULL);
 	pthread_cond_init(&thpool_p->threads_all_idle, NULL);
 
 	/* Thread init */
@@ -326,7 +326,9 @@ void thpool_destroy(thpool_* thpool_p){
 	volatile int threads_total = thpool_p->num_threads_alive;
 
 	/* End each thread 's infinite loop */
-	threads_keepalive = 0;
+	pthread_mutex_lock(&thpool_p->alive_lock);
+	thpool_p->threads_keepalive = 0;
+	pthread_mutex_unlock(&thpool_p->alive_lock);
 
 	/* Give one second to kill idle threads */
 	double TIMEOUT = 1.0;
@@ -354,6 +356,9 @@ void thpool_destroy(thpool_* thpool_p){
 		thread_destroy(thpool_p->threads[n]);
 	}
 	free(thpool_p->threads);
+	pthread_mutex_destroy(&thpool_p->thcount_lock);
+	pthread_mutex_destroy(&thpool_p->alive_lock);
+	pthread_cond_destroy(&thpool_p->threads_all_idle);
 	free(thpool_p);
 }
 
@@ -369,12 +374,10 @@ void thpool_pause(thpool_* thpool_p) {
 
 /* Resume all threads in threadpool */
 void thpool_resume(thpool_* thpool_p) {
-    // resuming a single threadpool hasn't been
-    // implemented yet, meanwhile this suppresses
-    // the warnings
-    (void)thpool_p;
-
-	threads_on_hold = 0;
+	int n;
+	for (n=0; n < thpool_p->num_threads_alive; n++){
+		pthread_kill(thpool_p->threads[n]->pthread, SIGUSR2);
+	}
 }
 
 
@@ -387,6 +390,15 @@ int thpool_queue_out_len(thpool_* thpool_p){
 	return thpool_p->queue_out.len;
 }
 
+
+int thpool_alive_state(thpool_* thpool_p){
+	int state;
+	pthread_mutex_lock(&thpool_p->alive_lock);
+	state = thpool_p->threads_keepalive;
+	pthread_mutex_unlock(&thpool_p->alive_lock);
+
+	return state;
+}
 
 
 
@@ -422,10 +434,15 @@ static int thread_init (thpool_* thpool_p, struct thread** thread_p, int id){
 
 /* Sets the calling thread on hold */
 static void thread_hold(int sig_id) {
-    (void)sig_id;
-	threads_on_hold = 1;
-	while (threads_on_hold){
-		sleep(1);
+	switch(sig_id) {
+		case SIGUSR1:
+			pause();
+			break;
+		case SIGUSR2:
+			break;
+		default:
+			err("thread_hold(): Invalid sig_id");
+			break;
 	}
 }
 
@@ -469,6 +486,9 @@ static void* thread_do(struct thread* thread_p){
 	if (sigaction(SIGUSR1, &act, NULL) == -1) {
 		err("thread_do(): cannot handle SIGUSR1");
 	}
+	if (sigaction(SIGUSR2, &act, NULL) == -1) {
+		err("thread_do(): cannot handle SIGUSR2");
+	}
 
 	/* Mark thread as alive (initialized) */
 	pthread_mutex_lock(&thpool_p->thcount_lock);
@@ -479,11 +499,11 @@ static void* thread_do(struct thread* thread_p){
 	ts.tv_sec  = 0;
 	ts.tv_nsec = 1;
 
-	while(threads_keepalive){
+	while(thpool_alive_state(thpool_p)){
 
 		bsem_wait(thpool_p->queue_in.has_jobs);
 
-		if (threads_keepalive){
+		if (thpool_alive_state(thpool_p)){
 
 			pthread_mutex_lock(&thpool_p->thcount_lock);
 			thpool_p->num_threads_working++;
@@ -714,6 +734,8 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 /* Free all queue resources back to the system */
 static void jobqueue_destroy(jobqueue* jobqueue_p){
 	jobqueue_clear(jobqueue_p);
+	pthread_mutex_destroy(&jobqueue_p->rwmutex);
+	bsem_destroy(jobqueue_p->has_jobs);
 	free(jobqueue_p->has_jobs);
 }
 
@@ -770,4 +792,11 @@ static void bsem_wait(bsem* bsem_p) {
 	}
 	bsem_p->v = 0;
 	pthread_mutex_unlock(&bsem_p->mutex);
+}
+
+
+/* Wait on semaphore until semaphore has value 0 */
+static void bsem_destroy(bsem* bsem_p) {
+	pthread_mutex_destroy(&(bsem_p->mutex));
+	pthread_cond_destroy(&(bsem_p->cond));
 }

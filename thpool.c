@@ -49,6 +49,8 @@ static volatile int threads_on_hold;
 //TODO DUMPING GROUND
 //===================
 //TODO:(captured) Better solution for all the debug messages
+//		add err() msgs where I added more error handling
+//			replace err() with fprintf, so I can output parameter settings.
 //TODO:(captured) add queue metrics
 //TODO:(captured) add queue size limit (or maybe just a warning that a threshold has been exceeded)
 //TODO:(captured) Some\all structs need to move to .h file, so available to users of primary thpool apis.
@@ -60,6 +62,11 @@ static volatile int threads_on_hold;
 //TODO: Review mutex usage.
 //		Some thread-shared "volatile" struct params are read outside of mutex locks.
 //			Should locks be added?
+
+
+
+
+
 
 /* ========================== STRUCTURES ============================ */
 
@@ -209,9 +216,6 @@ struct thpool_* thpool_init(int num_threads){
 			thpool_destroy(thpool_p);
 			return NULL;
 		}
-#if THPOOL_DEBUG
-		printf("THPOOL_DEBUG: Created thread %d in pool \n", n);
-#endif
 	}
 
 	/* Wait for threads to initialize */
@@ -225,7 +229,8 @@ struct thpool_* thpool_init(int num_threads){
 		wait_count++;
 		if (wait_count > 100000000){//Kludge to give 10 sec max wait
 #if THPOOL_DEBUG
-			printf("THPOOL_DEBUG: Timeout waiting for all pool threads to start\n");
+			printf("THPOOL_DEBUG: %s: Timeout waiting for all threads\n",
+			       __func__);
 #endif
 			thpool_destroy(thpool_p);
 			return NULL;
@@ -270,26 +275,35 @@ int thpool_find_result(thpool_* thpool_p, int job_uuid, int retry_count_max, int
 	ts.tv_sec  = 0;
 	ts.tv_nsec = retry_interval_ns;
 
-	// printf("thpool_find_result(): getting result for uuid %d\n", job_uuid);
 	while(retry_count < retry_count_max){
 
 		completed_job = jobqueue_pull_by_uuid(&thpool_p->queue_out, job_uuid);
 		if (completed_job){
-		// 	printf("thpool_find_result(): retrieved job: uuid %d, %p\n", job_uuid, completed_job);
 			*result_p = completed_job->result;
 			free(completed_job);
 			result_found = 1;
 			break;
 		}
 		else{
-		// 	printf("thpool_find_result(): No job found: uuid %d.  Sleeping\n", job_uuid);
 			nanosleep(&ts, &ts);
 		}
 		retry_count++;
 	}
 
-	if (result_found) return 0;
-	else              return -1;
+	if (result_found){
+#if THPOOL_DEBUG
+		printf("THPOOL_DEBUG: %s: job(%p) found: uuid %d\n",
+		       __func__, completed_job, job_uuid);
+#endif
+		return 0;
+	}
+	else{
+#if THPOOL_DEBUG
+		printf("THPOOL_DEBUG: %s: job NOT found: uuid %d\n",
+		       __func__, job_uuid);
+#endif
+		return -1;
+	}
 }
 
 
@@ -403,6 +417,9 @@ static int thread_init (thpool_* thpool_p, struct thread** thread_p, int id){
 
 	pthread_create(&(*thread_p)->pthread, NULL, (void * (*)(void *)) thread_do, (*thread_p));
 	pthread_detach((*thread_p)->pthread);
+#if THPOOL_DEBUG
+	printf("THPOOL_DEBUG: %s: Thread created (id:%d)\n", __func__, id);
+#endif
 	return 0;
 }
 
@@ -432,7 +449,8 @@ static void* thread_do(struct thread* thread_p){
 	snprintf(thread_name, 16, "thpool-%d", thread_p->id);
 //TODO: Set thread "id" here instead (using pthread_self())????  Use both??
 #if THPOOL_DEBUG
-	printf("THPOOL_DEBUG: Starting Thread #%u\n", (int)pthread_self());
+	printf("THPOOL_DEBUG: %s: Thread started (id:%d, pthread:%u)\n",
+	       __func__, thread_p->id, (unsigned int)pthread_self());
 #endif
 
 #if defined(__linux__)
@@ -554,7 +572,6 @@ static void jobqueue_clear(jobqueue* jobqueue_p){
  */
 static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 
-	// printf("          push: start: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 	newjob->prev = NULL;
 
@@ -566,19 +583,20 @@ static void jobqueue_push(jobqueue* jobqueue_p, struct job* newjob){
 			break;
 
 		default: /* if jobs in queue */
-			// printf("          push: dft: job(%p) to queue(%p) on thread #%u with rear(%p)\n", newjob, jobqueue_p, (int)pthread_self(), jobqueue_p->rear);
 			jobqueue_p->rear->prev = newjob;
 			jobqueue_p->rear = newjob;
 	}
 	jobqueue_p->len++;
 	if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
-		printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
-		       MAX_QUEUE_SIZE_WITHOUT_WARNING);
+		printf("%s: WARNING: queue len > %d\n",
+		       __func__, MAX_QUEUE_SIZE_WITHOUT_WARNING);
 
 	bsem_post(jobqueue_p->has_jobs);
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
-	// printf("          push: end: job(%p) to queue(%p) on thread #%u\n", newjob, jobqueue_p, (int)pthread_self());
-	// printf("               push: job uuid %d\n", newjob->uuid);
+#if THPOOL_DEBUG
+	printf("THPOOL_DEBUG: %s: job(%p) with uuid %d added to queue(%p) (on pthread:%u)\n",
+	       __func__, newjob, newjob->uuid, jobqueue_p, (unsigned int)pthread_self());
+#endif
 }
 
 
@@ -605,16 +623,20 @@ static struct job* jobqueue_pull_front(jobqueue* jobqueue_p){
 			jobqueue_p->front = job_p->prev;
 			jobqueue_p->len--;
 			if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
-				printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
-				       MAX_QUEUE_SIZE_WITHOUT_WARNING);
+				printf("%s: WARNING: queue len > %d\n",
+				       __func__, MAX_QUEUE_SIZE_WITHOUT_WARNING);
 			/* more than one job in queue -> post it */
 			bsem_post(jobqueue_p->has_jobs);
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
-	// printf("          pull_front: job(%p) from queue(%p)\n", job_p, jobqueue_p);
-	// if (job_p)
-	// 	printf("               pull_front: job uuid %d\n", job_p->uuid);
+#if THPOOL_DEBUG
+	int uuid = -1;
+	if (job_p) uuid = job_p->uuid;
+	printf("THPOOL_DEBUG: %s: job(%p) with uuid %d pulled from queue(%p) (on pthread:%u)\n",
+	       __func__, job_p, uuid, jobqueue_p, (unsigned int)pthread_self());
+#endif
+
 	return job_p;
 }
 
@@ -635,14 +657,11 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 */
 	pthread_mutex_lock(&jobqueue_p->rwmutex);
 
-	job* curr_job_p = jobqueue_p->front;
-	job* last_job_p = NULL;//Equivalent of curr_job_p->next, if double-linked list implemented. Code is scanning linked list "backwards"
+	job* curr_job_p = jobqueue_p->front;  /* scan queue front to back */
+	job* last_job_p = NULL;  //Make queue a double-linked list?
 
-	// printf("          main: pull_by_uuid: search start: uuid %d in queue(%p) with len %d\n", uuid, jobqueue_p, jobqueue_p->len);
 	while (curr_job_p){
-		// printf("                                             main: pull_by_uuid: curr_job_p(%p), curr_job_p->prev(%p), last_job_p(%p)\n", curr_job_p, curr_job_p->prev, last_job_p);
 		if (curr_job_p->uuid == job_uuid){
-			// printf("          main: pull_by_uuid: found uuid %d, %p\n", curr_job_p->uuid, curr_job_p);
 			break;
 		}
 		last_job_p = curr_job_p;
@@ -678,17 +697,20 @@ TODO: Do I want to implement "trylock" like I did in POC?  If so, how?
 
 				jobqueue_p->len--;
 				if (jobqueue_p->len > MAX_QUEUE_SIZE_WITHOUT_WARNING)
-					printf("THPOOL_DEBUG: WARNING: queue len > %d\n",
-					       MAX_QUEUE_SIZE_WITHOUT_WARNING);
+					printf("%s: WARNING: queue len > %d\n",
+					       __func__, MAX_QUEUE_SIZE_WITHOUT_WARNING);
 				/* more than one job in queue -> post it */
 				bsem_post(jobqueue_p->has_jobs);
 		}
 	}
 
 	pthread_mutex_unlock(&jobqueue_p->rwmutex);
-	// printf("          main: pull_by_uuid: job(%p) from queue(%p)\n", curr_job_p, jobqueue_p);
-	// if (curr_job_p)
-	// 	printf("               main: pull_by_uuid: job uuid %d\n", curr_job_p->uuid);
+#if THPOOL_DEBUG
+	int uuid = -1;
+	if (curr_job_p) uuid = curr_job_p->uuid;
+	printf("THPOOL_DEBUG: %s: job(%p) with uuid %d pulled from queue(%p) (on pthread:%u)\n",
+	       __func__, curr_job_p, uuid, jobqueue_p, (unsigned int)pthread_self());
+#endif
 	return curr_job_p;
 }
 

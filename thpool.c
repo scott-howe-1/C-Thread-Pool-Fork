@@ -114,7 +114,8 @@ typedef struct thpool_{
 	pthread_mutex_t  thcount_lock;       /* used for thread count etc */
 	pthread_cond_t  threads_all_idle;    /* signal to thpool_wait     */
 
-	volatile int threads_keepalive;      /* All threads live\die flag */
+	volatile int threads_keepalive;      /* live\die status flag      */
+	volatile int threads_on_hold;        /* run\pause status flag     */
 	pthread_mutex_t  alive_lock;         /* used for thpool run state */
 
 	jobqueue  queue_in;                  /* queue for pending jobs    */
@@ -171,6 +172,7 @@ struct thpool_* thpool_init(int num_threads){
 	}
 	thpool_p->num_threads_alive   = 0;
 	thpool_p->num_threads_working = 0;
+	thpool_p->threads_on_hold     = 0;
 	thpool_p->threads_keepalive   = 1;
 
 	/* Initialise the job queue */
@@ -367,6 +369,7 @@ void thpool_pause(thpool_* thpool_p) {
 	for (n=0; n < thpool_num_threads_alive(thpool_p); n++){
 		pthread_kill(thpool_p->threads[n]->pthread, SIGUSR1);
 	}
+	thpool_p->threads_on_hold = 1;
 }
 
 
@@ -376,6 +379,7 @@ void thpool_resume(thpool_* thpool_p) {
 	for (n=0; n < thpool_num_threads_alive(thpool_p); n++){
 		pthread_kill(thpool_p->threads[n]->pthread, SIGUSR2);
 	}
+	thpool_p->threads_on_hold = 0;
 }
 
 

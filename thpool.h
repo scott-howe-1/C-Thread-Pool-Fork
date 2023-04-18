@@ -202,7 +202,30 @@ void thpool_destroy(threadpool);
 
 
 /**
- * @brief Show currently working threads
+ * @brief Show number of currently active threads
+ *
+ * This is total total number of active thread in the pool, working
+ * and idle.  Should always be the same.
+ * Function created to ensure thread-safe access of value.
+ *
+ * @example
+ * int main() {
+ *    threadpool thpool1 = thpool_init(2);
+ *    threadpool thpool2 = thpool_init(2);
+ *    ..
+ *    printf("Working threads: %d\n", thpool_num_threads_alive(thpool1));
+ *    ..
+ *    return 0;
+ * }
+ *
+ * @param threadpool     the threadpool of interest
+ * @return integer       number of threads alive in pool
+ */
+int thpool_num_threads_alive(threadpool);
+
+
+/**
+ * @brief Show number of currently working threads
  *
  * Working threads are the threads that are performing work (not idle).
  *
@@ -240,6 +263,24 @@ int thpool_num_threads_working(threadpool);
  */
 int thpool_queue_out_len(threadpool);
 
+/**
+ * @brief Show current state of thpool "keepalive" flag.
+ *
+ * @example
+ * int main() {
+ *    threadpool thpool1 = thpool_init(2);
+ *    threadpool thpool2 = thpool_init(2);
+ *    ..
+ *    printf("Queue out length: %d\n", thpool_alive_state(thpool1));
+ *    ..
+ *    return 0;
+ * }
+ *
+ * @param threadpool     the threadpool of interest
+ * @return integer       thpool's "keepalive" flag state.
+ *                       1 - keep all threads alive, 0 - kill all threads
+ */
+int thpool_alive_state(threadpool);
 
 #ifdef __cplusplus
 }
